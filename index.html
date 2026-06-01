@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>CDM Command Centre — Shree Pratha</title>
+<title>Pratha's Internship Command Centre</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='16' fill='%234f46e5'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='central' text-anchor='middle' font-family='Arial' font-weight='800' font-size='17' fill='white'%3EP%3C/text%3E%3C/svg%3E"/>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:system-ui,-apple-system,sans-serif;background:#f8fafc;color:#1e293b;min-height:100vh}
@@ -193,7 +194,7 @@ const IC={
 
 // ── APP ────────────────────────────────────────────────────────────────────
 function App(){
-  const[tab,setTab]=useState("search");
+  const[tab,setTab]=useState("myjobs");
   const[city,setCity]=useState("Both");
   const[activeKW,setActiveKW]=useState(["Clinical Data Management","CDM Intern","Fresher"]);
   const[customKW,setCustomKW]=useState("");
@@ -333,135 +334,117 @@ SKILLS TO HIGHLIGHT FOR THIS ROLE:
     reader.readAsDataURL(file);
   };
 
-  // Build job context string from all inputs
   const buildJobContext=()=>{
-    let ctx="";
-    if(applyCompany)ctx+=`Company: ${applyCompany}\n`;
-    if(applyRole)ctx+=`Role: ${applyRole}\n`;
-    if(applyHRName)ctx+=`HR Contact: ${applyHRName}\n`;
-    if(applyHREmail)ctx+=`HR Email: ${applyHREmail}\n`;
-    if(applyJobURL)ctx+=`Job URL: ${applyJobURL}\n`;
-    if(applyJD)ctx+=`\nFull Job Description:\n${applyJD}`;
-    return ctx;
+    const parts=[];
+    if(applyCompany)parts.push("Company: "+applyCompany);
+    if(applyRole)parts.push("Role: "+applyRole);
+    if(applyCity)parts.push("City: "+applyCity);
+    if(applyHRName)parts.push("HR Contact: "+applyHRName);
+    if(applyHREmail)parts.push("HR Email: "+applyHREmail);
+    if(applyJobURL)parts.push("Job URL: "+applyJobURL);
+    if(applyJD)parts.push("\nJob Description:\n"+applyJD);
+    return parts.join("\n");
   };
 
-  // Generate with optional PDF CV
+  // Stable named generate — no complex inline async in template
   const applyGenerate=async(type)=>{
     if(!apiKey){setShowKey(true);notify("Set API key first","err");return;}
     const jctx=buildJobContext();
-    if(!jctx.trim()){notify("Add at least a company name or JD","err");return;}
+    if(!jctx.trim()){notify("Add company name or paste a JD first","err");return;}
     setApplyGenerating(type);
     try{
       const cvContext=cvBase64
-        ?"I have uploaded my CV as a PDF. Please read it carefully and use my actual experience, skills, and achievements from it."
-        :`Candidate profile: M.Tech Biotechnology 2026, Dr DY Patil Institute Pune.
-Experience:
-- Business & Data Analysis Intern, Digitank Services: competitor analysis AGCO 5 global markets, GA4 & Looker Studio (identified 15% mobile conversion drop), 25+ KPI dashboards, A/B testing support (12% repeat visits increase)
-- Industrial Training Intern QA/QC, Medioint Pharmaceuticals: QA/QC operations, SOP adherence, batch record review, GMP-compliant manufacturing documentation
-Skills: Excel, Google Analytics, Looker Studio, R (basic), SQL (learning), Statistical Analysis, Bioprocess Engineering, SOP, GMP, Batch Record Review
-Certifications in progress: FutureSkills Prime CDM, Vanderbilt CDM (Coursera)`;
+        ?"The candidate's CV is attached as a PDF. Read it carefully and use the actual experience, skills and achievements from it."
+        :("Candidate Profile:\nShree Pratha Thakkar — M.Tech Integrated Biotechnology, Dr DY Patil Institute Pune (2026)\n"
+          +"Experience:\n"
+          +"1. Business & Data Analysis Intern, Digitank Services (2025-Present): Competitor analysis AGCO 5 global markets, GA4 & Looker Studio identifying 15% mobile conversion drop, 25+ KPI dashboards across 7 sources, A/B testing support (12% repeat visits increase)\n"
+          +"2. Industrial Training Intern QA/QC, Medioint Pharmaceuticals (2025): QA/QC at therapeutic ointments unit, SOP adherence, batch record review, lab testing, GMP-compliant protocol documentation\n"
+          +"Skills: Excel, Google Analytics, Looker Studio, R (basic), SQL (learning), Statistical Analysis, Bioprocess Engineering, SOP Adherence, GMP Compliance, Batch Record Review\n"
+          +"Certifications in progress: FutureSkills Prime CDM, Vanderbilt CDM (Coursera)");
+
+      const hrSalutation=applyHRName?"Dear "+applyHRName+",":"Dear Hiring Manager,";
 
       const prompts={
-        cv:`You are a professional CV writer specialising in pharmaceutical and clinical research careers.
+        cv:"You are a professional CV writer for pharmaceutical and clinical research careers.\n\n"
+          +cvContext+"\n\nJob details:\n"+jctx+"\n\n"
+          +"Rewrite and optimise this CV for the role. Use this EXACT structure with the separator lines:\n\n"
+          +"\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n"
+          +"PROFESSIONAL HEADLINE\n"
+          +"\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n"
+          +"[1 powerful line]\n\n"
+          +"\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n"
+          +"PROFESSIONAL SUMMARY\n"
+          +"\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n"
+          +"[3-4 targeted sentences]\n\n"
+          +"\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n"
+          +"KEY SKILLS\n"
+          +"\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n"
+          +"[6-8 most relevant skills as bullet points]\n\n"
+          +"\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n"
+          +"EXPERIENCE — REWRITTEN\n"
+          +"\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n"
+          +"[Each role with rewritten bullets using JD language]\n\n"
+          +"\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n"
+          +"KEYWORDS TO ADD\n"
+          +"\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\n"
+          +"[JD keywords missing from current CV for ATS]",
 
-${cvContext}
+        cover:"Write a compelling cover letter for this application.\n\n"
+          +cvContext+"\n\nJob details:\n"+jctx+"\n\n"
+          +hrSalutation+"\n\n"
+          +"[Opening — lead with a specific achievement. Name the exact role.]\n\n"
+          +"[Middle — connect pharma QA/QC and data analytics background to this role. Use JD language. 2-3 quantified achievements.]\n\n"
+          +"[Closing — genuine interest in this company. Clear ask.]\n\n"
+          +"Warm regards,\nShree Pratha Thakkar\nthakkarpratha@gmail.com | +91 8350925545\n\n"
+          +"Rules: Under 280 words. Never start with 'I am writing to apply'. Never say 'I believe I would be a great fit'. Be specific and confident.",
 
-Job details:
-${jctx}
-
-Task: Rewrite and optimize the CV specifically for this role. Structure your response EXACTLY as follows with these headings:
-
-═══════════════════════════════════════
-PROFESSIONAL HEADLINE
-═══════════════════════════════════════
-[1 punchy line tailored to this specific role and company]
-
-═══════════════════════════════════════
-PROFESSIONAL SUMMARY
-═══════════════════════════════════════
-[3-4 sentences. Lead with relevant skills. Reference the specific role. Quantify wherever possible.]
-
-═══════════════════════════════════════
-KEY SKILLS FOR THIS ROLE
-═══════════════════════════════════════
-[Two columns of 6-8 skills each, prioritised for this JD. Mark new skills to add with (*)]
-
-═══════════════════════════════════════
-EXPERIENCE — REWRITTEN BULLETS
-═══════════════════════════════════════
-[For each role, rewrite bullets using clinical/CDM language that mirrors the JD keywords]
-
-═══════════════════════════════════════
-KEYWORDS TO ADD
-═══════════════════════════════════════
-[JD keywords not currently in the CV — add these to pass ATS screening]
-
-═══════════════════════════════════════
-WHAT TO REMOVE OR SHORTEN
-═══════════════════════════════════════
-[Anything that weakens this specific application]`,
-
-        cover:`You are an expert cover letter writer for pharmaceutical and clinical research roles.
-
-${cvContext}
-
-Job details:
-${jctx}
-
-Write a professional, compelling cover letter. Structure EXACTLY as:
-
-[Date]
-[Company Name]
-[City]
-
-Dear ${applyHRName?"Mr./Ms. "+applyHRName:"Hiring Manager"},
-
-[Opening paragraph — hook with a specific achievement. Name the exact role.]
-
-[Middle paragraph — connect her pharma QA/QC + data analytics background directly to what this role needs. Use specific JD language. 2-3 key achievements with numbers.]
-
-[Closing paragraph — show genuine interest in this specific company. Clear call to action.]
-
-Warm regards,
-Shree Pratha Thakkar
-thakkarpratha@gmail.com | +91 8350925545
-
-[Keep under 280 words total. Never use phrases like "I am writing to apply" or "I believe I would be a great fit".]`,
-
-        email:`Write a cold outreach / application email for Shree Pratha Thakkar.
-
-${cvContext}
-
-Job details:
-${jctx}
-
-Write a SHORT, punchy email. Structure EXACTLY as:
-
-Subject: [Compelling, specific subject line — not generic]
-
-Dear ${applyHRName||"[HR Name]"},
-
-[3-4 sentences max. One specific hook about the company or role. Her strongest relevant credential. Clear ask.]
-
-Best regards,
-Shree Pratha Thakkar
-thakkarpratha@gmail.com | +91 8350925545${applyHREmail?`
-[Send to: ${applyHREmail}]`:""}
-
-[Hard limit: 100 words in the body. Make every word count.]`
+        email:"Write a punchy cold outreach email.\n\n"
+          +cvContext+"\n\nJob details:\n"+jctx+"\n\n"
+          +"Format exactly:\n"
+          +"Subject: [compelling, specific subject line]\n\n"
+          +hrSalutation+"\n\n"
+          +"[3-4 sentences max. One specific hook about the company. Strongest credential. Clear ask.]\n\n"
+          +"Best regards,\nShree Pratha Thakkar\nthakkarpratha@gmail.com | +91 8350925545\n"
+          +(applyHREmail?"\n[Send to: "+applyHREmail+"]":"")+"\n\n"
+          +"Rules: Under 100 words in the body. Every word counts."
       };
 
-      const userContent=cvBase64?[
-        {type:"document",source:{type:"base64",media_type:"application/pdf",data:cvBase64}},
-        {type:"text",text:prompts[type]}
-      ]:[{type:"text",text:prompts[type]}];
+      const userContent=cvBase64
+        ?[{type:"document",source:{type:"base64",media_type:"application/pdf",data:cvBase64}},{type:"text",text:prompts[type]}]
+        :[{type:"text",text:prompts[type]}];
 
       const result=await callClaude([{role:"user",content:userContent}],apiKey);
       setApplyOutputs(p=>({...p,[type]:result}));
-    }catch(e){notify(`Error: ${e.message.slice(0,70)}`,"err");}
-    setApplyGenerating(null);
+      notify(type==="cv"?"CV optimised ✓":type==="cover"?"Cover letter ready ✓":"Email ready ✓");
+    }catch(e){
+      console.error("Generate error:",e);
+      notify("Error: "+e.message.slice(0,70),"err");
+    }finally{
+      setApplyGenerating(null);
+    }
   };
 
+  // Named refine handler — avoids complex inline async in template
+  const applyRefineSubmit=async(type)=>{
+    const instruction=applyRefine[type];
+    if(!instruction||!instruction.trim()||!apiKey)return;
+    setApplyGenerating(type);
+    try{
+      const current=applyOutputs[type]||"";
+      const docLabel=type==="cv"?"CV":type==="cover"?"cover letter":"email";
+      const r=await callClaude([{role:"user",content:"Here is the current "+docLabel+":\n\n"+current+"\n\nPlease make these specific changes: "+instruction+"\n\nReturn the complete updated "+docLabel+" only. No explanation."}],apiKey);
+      setApplyOutputs(p=>({...p,[type]:r}));
+      setApplyRefine(p=>({...p,[type]:""}));
+      notify("Updated ✓");
+    }catch(e){
+      notify("Error: "+e.message.slice(0,50),"err");
+    }finally{
+      setApplyGenerating(null);
+    }
+  };
+
+
+  // Named refine handler — avoids complex inline async in template
   const applyCopy=(text,key)=>{
     navigator.clipboard.writeText(text).catch(()=>{});
     setApplyCopied(key);setTimeout(()=>setApplyCopied(null),2000);
@@ -566,11 +549,9 @@ thakkarpratha@gmail.com | +91 8350925545${applyHREmail?`
   ];
 
   const TABS=[
-    {id:"search", label:"Find Jobs",ico:IC.search},
-    {id:"myjobs", label:"My Jobs",  ico:IC.spark, badge:myJobs.length},
-    {id:"apply",  label:"AI Apply", ico:IC.file},
-    {id:"tracker",label:"Tracker",  ico:IC.brief, badge:tracker.length},
-    {id:"profile",label:"Profile",  ico:IC.user},
+    {id:"myjobs", label:"My Jobs",     ico:IC.spark, badge:myJobs.length},
+    {id:"apply",  label:"Apply Suite", ico:IC.file},
+    {id:"profile",label:"Profile",     ico:IC.user},
   ];
 
   return html`<div style=${{background:T.bg,minHeight:"100vh"}}>
@@ -599,7 +580,7 @@ thakkarpratha@gmail.com | +91 8350925545${applyHREmail?`
 
       <!-- HEADER -->
       <div style=${{textAlign:"center",marginBottom:28}}>
-        <h1 style=${{fontSize:26,fontWeight:800,color:T.text,marginBottom:6}}>CDM Internship Command Centre</h1>
+        <h1 style=${{fontSize:23,fontWeight:800,color:T.text,marginBottom:6}}>Pratha's Internship Command Centre</h1>
         <p style=${{fontSize:13,color:T.textMuted,marginBottom:14}}>Shree Pratha Thakkar · Bangalore & Pune</p>
         <button onClick=${()=>{setKeyInput(apiKey);setShowKey(true);}} style=${{...btnG,fontSize:12,padding:"6px 14px",borderColor:apiKey?T.greenBorder:T.border,background:apiKey?T.greenLight:"transparent",color:apiKey?T.green:T.textSec}}>
           <${Ico} d=${IC.key} s=${13} c=${apiKey?T.green:T.textSec}/> ${apiKey?"API Key Set ✓ — tap to change":"Set API Key for AI documents"}
@@ -952,23 +933,7 @@ thakkarpratha@gmail.com | +91 8350925545${applyHREmail?`
                 <p style=${{fontSize:11,fontWeight:700,color:T.textMuted,marginBottom:8,letterSpacing:".06em"}}>MAKE CHANGES</p>
                 <div style=${{display:"flex",gap:8}}>
                   <textarea placeholder="e.g. Make the summary shorter · Add more pharma keywords · Rewrite Medioint bullets to focus on compliance · Change tone to be more confident..." value=${applyRefine.cv} onInput=${e=>setApplyRefine(p=>({...p,cv:e.target.value}))} style=${{...inp,flex:1,minHeight:56,resize:"vertical"}}/>
-                  <button onClick=${async()=>{
-                    if(!applyRefine.cv.trim())return;
-                    setApplyGenerating("cv");
-                    try{
-                      const r=await callClaude([{role:"user",content:`Here is the current CV:
-
-${applyOutputs.cv}
-
-Please make these specific changes: ${applyRefine.cv}
-
-Return the complete updated CV in the same format.`}],apiKey);
-                      setApplyOutputs(p=>({...p,cv:r}));
-                      setApplyRefine(p=>({...p,cv:""}));
-                      notify("CV updated ✓");
-                    }catch(e){notify("Error: "+e.message.slice(0,50),"err");}
-                    setApplyGenerating(null);
-                  }} disabled=${!!applyGenerating||!applyRefine.cv.trim()} style=${{...btnP,padding:"8px 14px",fontSize:12,flexShrink:0,alignSelf:"flex-end",opacity:(!applyRefine.cv.trim()||!!applyGenerating)?.4:1}}>
+                  <button onClick=${()=>applyRefineSubmit("cv")}} disabled=${!!applyGenerating||!applyRefine.cv.trim()} style=${{...btnP,padding:"8px 14px",fontSize:12,flexShrink:0,alignSelf:"flex-end",opacity:(!applyRefine.cv.trim()||!!applyGenerating)?.4:1}}>
                     ${applyGenerating==="cv"?"Updating...":"Regenerate"}
                   </button>
                 </div>
@@ -999,23 +964,7 @@ Return the complete updated CV in the same format.`}],apiKey);
                 <p style=${{fontSize:11,fontWeight:700,color:T.textMuted,marginBottom:8,letterSpacing:".06em"}}>MAKE CHANGES</p>
                 <div style=${{display:"flex",gap:8}}>
                   <textarea placeholder="e.g. Make the opening more compelling · Mention my GMP experience · Remove the third paragraph · Use a more formal tone..." value=${applyRefine.cover} onInput=${e=>setApplyRefine(p=>({...p,cover:e.target.value}))} style=${{...inp,flex:1,minHeight:56,resize:"vertical"}}/>
-                  <button onClick=${async()=>{
-                    if(!applyRefine.cover.trim())return;
-                    setApplyGenerating("cover");
-                    try{
-                      const r=await callClaude([{role:"user",content:`Here is the current cover letter:
-
-${applyOutputs.cover}
-
-Please make these changes: ${applyRefine.cover}
-
-Return the complete updated cover letter.`}],apiKey);
-                      setApplyOutputs(p=>({...p,cover:r}));
-                      setApplyRefine(p=>({...p,cover:""}));
-                      notify("Cover letter updated ✓");
-                    }catch(e){notify("Error: "+e.message.slice(0,50),"err");}
-                    setApplyGenerating(null);
-                  }} disabled=${!!applyGenerating||!applyRefine.cover.trim()} style=${{...btnP,padding:"8px 14px",fontSize:12,flexShrink:0,alignSelf:"flex-end",background:T.pink,opacity:(!applyRefine.cover.trim()||!!applyGenerating)?.4:1}}>
+                  <button onClick=${()=>applyRefineSubmit("cover")}} disabled=${!!applyGenerating||!applyRefine.cover.trim()} style=${{...btnP,padding:"8px 14px",fontSize:12,flexShrink:0,alignSelf:"flex-end",background:T.pink,opacity:(!applyRefine.cover.trim()||!!applyGenerating)?.4:1}}>
                     ${applyGenerating==="cover"?"Updating...":"Regenerate"}
                   </button>
                 </div>
@@ -1041,23 +990,7 @@ Return the complete updated cover letter.`}],apiKey);
                 <p style=${{fontSize:11,fontWeight:700,color:T.textMuted,marginBottom:8,letterSpacing:".06em"}}>MAKE CHANGES</p>
                 <div style=${{display:"flex",gap:8}}>
                   <textarea placeholder="e.g. Make it shorter · Add a specific achievement · Change the subject line · Use a more casual tone..." value=${applyRefine.email} onInput=${e=>setApplyRefine(p=>({...p,email:e.target.value}))} style=${{...inp,flex:1,minHeight:56,resize:"vertical"}}/>
-                  <button onClick=${async()=>{
-                    if(!applyRefine.email.trim())return;
-                    setApplyGenerating("email");
-                    try{
-                      const r=await callClaude([{role:"user",content:`Here is the current email:
-
-${applyOutputs.email}
-
-Please make these changes: ${applyRefine.email}
-
-Return the complete updated email.`}],apiKey);
-                      setApplyOutputs(p=>({...p,email:r}));
-                      setApplyRefine(p=>({...p,email:""}));
-                      notify("Email updated ✓");
-                    }catch(e){notify("Error: "+e.message.slice(0,50),"err");}
-                    setApplyGenerating(null);
-                  }} disabled=${!!applyGenerating||!applyRefine.email.trim()} style=${{...btnP,padding:"8px 14px",fontSize:12,flexShrink:0,alignSelf:"flex-end",background:T.green,opacity:(!applyRefine.email.trim()||!!applyGenerating)?.4:1}}>
+                  <button onClick=${()=>applyRefineSubmit("email")}} disabled=${!!applyGenerating||!applyRefine.email.trim()} style=${{...btnP,padding:"8px 14px",fontSize:12,flexShrink:0,alignSelf:"flex-end",background:T.green,opacity:(!applyRefine.email.trim()||!!applyGenerating)?.4:1}}>
                     ${applyGenerating==="email"?"Updating...":"Regenerate"}
                   </button>
                 </div>
@@ -1159,7 +1092,13 @@ Return the complete updated email.`}],apiKey);
         </div>
       `}
     </div>
-  </div>`;
+
+    <!-- FOOTER -->
+    <div style=${{textAlign:"center",padding:"24px 16px",marginTop:8,borderTop:`1px solid ${T.border}`}}>
+      <p style=${{fontSize:12,color:T.textMuted}}>Made with <span style=${{color:"#ef4444",fontSize:13}}>♥</span> by SRM</p>
+    </div>
+
+  </div>\`;
 }
 
 createRoot(document.getElementById("root")).render(html`<${App}/>`);
