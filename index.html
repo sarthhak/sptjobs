@@ -469,48 +469,97 @@ thakkarpratha@gmail.com | +91 8350925545${applyHREmail?`
   };
 
   // Print-to-PDF: opens a styled print window — user saves as PDF
+  const parseCVToHTML=(text,company,role)=>{
+    const esc=s=>(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    const fmtContent=t=>{
+      if(!t)return"";
+      let html="",inList=false;
+      t.split("\n").forEach(line=>{
+        const tr=line.trim();
+        if(!tr){if(inList){html+="</ul>";inList=false;}return;}
+        if(/^[•\-\*]/.test(tr)){
+          if(!inList){html+="<ul>";inList=true;}
+          html+="<li>"+esc(tr.replace(/^[•\-\*]\s*/,""))+"</li>";
+        }else{
+          if(inList){html+="</ul>";inList=false;}
+          const bold=esc(tr).replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>");
+          html+="<p>"+bold+"</p>";
+        }
+      });
+      if(inList)html+="</ul>";
+      return html;
+    };
+    const sections=[];
+    const parts=text.split(/\u2550{5,}/);
+    for(let i=0;i<parts.length;i++){
+      const p=parts[i].trim();
+      if(!p)continue;
+      const lines=p.split("\n").filter(l=>l.trim());
+      if(lines.length===1&&lines[0]===lines[0].toUpperCase()&&lines[0].length<70&&lines[0].length>3){
+        sections.push({title:lines[0],content:parts[i+1]?parts[i+1].trim():""});
+        i++;
+      }
+    }
+    if(!sections.length)return"<div style='white-space:pre-wrap;font-size:10pt;line-height:1.7'>"+esc(text)+"</div>";
+    const sHTML=sections.map(s=>"<div class='section'><h2>"+esc(s.title)+"</h2><div class='sc'>"+fmtContent(s.content)+"</div></div>").join("");
+    return "<div class='hdr'><h1>Shree Pratha Thakkar</h1><div class='contact'>thakkarpratha@gmail.com &nbsp;|&nbsp; +91 8350925545 &nbsp;|&nbsp; Pune, India (Relocating to Bangalore)</div>"
+      +(company?"<div class='target'>Optimised for: <strong>"+esc(company)+(role?" — "+esc(role):"")+"</strong></div>":"")
+      +"</div>"+sHTML;
+  };
+
   const downloadCV=()=>{
-    const content=applyOutputs.cv;
-    if(!content){notify("Generate CV first","err");return;}
-    const company=applyCompany||"Application";
+    const cvText=applyOutputs.cv;
+    if(!cvText){notify("Generate CV first","err");return;}
+    const bodyHTML=parseCVToHTML(cvText,applyCompany,applyRole);
     const win=window.open("","_blank");
-    win.document.write(`<!DOCTYPE html><html><head><title>CV — Shree Pratha Thakkar — ${company}</title>
-<style>
-  body{font-family:Arial,sans-serif;margin:40px;color:#1e293b;font-size:13px;line-height:1.6}
-  h1{font-size:22px;font-weight:800;color:#1e293b;margin:0 0 4px}
-  .sub{font-size:13px;color:#475569;margin-bottom:20px}
-  .contact{font-size:12px;color:#6366f1;margin-bottom:24px}
-  .section{margin-bottom:20px}
-  .section-title{font-size:12px;font-weight:700;color:#6366f1;letter-spacing:.08em;border-bottom:2px solid #e2e8f0;padding-bottom:4px;margin-bottom:10px}
-  .content{white-space:pre-wrap;font-size:13px;color:#1e293b}
-  @media print{body{margin:20px}@page{margin:15mm}}
-</style></head><body>
-<h1>Shree Pratha Thakkar</h1>
-<div class="contact">thakkarpratha@gmail.com · +91 8350925545 · Pune, India (Relocating to Bangalore)</div>
-<div class="section"><div class="section-title">OPTIMIZED FOR: ${company}${applyRole?" — "+applyRole:""}</div></div>
-<div class="content">${content.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div>
-<script>window.onload=()=>{window.print();}<\/script>
-</body></html>`);
+    if(!win){notify("Allow popups then try again","err");return;}
+    win.document.write("<!DOCTYPE html><html><head><meta charset='UTF-8'/><title>CV — Shree Pratha Thakkar"+(applyCompany?" — "+applyCompany:"")+"</title><style>"
+      +"@page{size:A4;margin:14mm 18mm}*{box-sizing:border-box;margin:0;padding:0}"
+      +"body{font-family:'Segoe UI',Arial,sans-serif;font-size:10.5pt;color:#1a1a1a;line-height:1.55;background:#fff}"
+      +".hdr{border-bottom:3px solid #4f46e5;padding-bottom:12px;margin-bottom:18px}"
+      +".hdr h1{font-size:22pt;font-weight:800;color:#1a1a1a;margin-bottom:5px;letter-spacing:-.3px}"
+      +".contact{font-size:9pt;color:#4f46e5;font-weight:500}"
+      +".target{font-size:8.5pt;color:#64748b;margin-top:4px}"
+      +".section{margin-bottom:15px;page-break-inside:avoid}"
+      +"h2{font-size:8.5pt;font-weight:700;color:#4f46e5;letter-spacing:.1em;text-transform:uppercase;border-bottom:1.5px solid #e2e8f0;padding-bottom:4px;margin-bottom:8px}"
+      +".sc p{font-size:10pt;margin-bottom:5px;color:#1a1a1a}"
+      +".sc ul{padding-left:16px;margin:2px 0 6px}"
+      +".sc li{font-size:10pt;margin-bottom:4px;color:#1a1a1a;line-height:1.45}"
+      +".sc strong{font-weight:700}"
+      +"@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}"
+      +"</style></head><body>"+bodyHTML+"<script>setTimeout(()=>window.print(),500);<\/script></body></html>");
     win.document.close();
   };
 
   const downloadCoverLetter=()=>{
-    const content=applyOutputs.cover;
-    if(!content){notify("Generate cover letter first","err");return;}
+    const cl=applyOutputs.cover;
+    if(!cl){notify("Generate cover letter first","err");return;}
     const win=window.open("","_blank");
-    win.document.write(`<!DOCTYPE html><html><head><title>Cover Letter — Shree Pratha Thakkar</title>
-<style>
-  body{font-family:Georgia,serif;margin:60px 80px;color:#1e293b;font-size:13px;line-height:1.8}
-  .content{white-space:pre-wrap}
-  @media print{body{margin:30mm 25mm}@page{margin:20mm}}
-</style></head><body>
-<div class="content">${content.replace(/</g,"&lt;").replace(/>/g,"&gt;")}</div>
-<script>window.onload=()=>{window.print();}<\/script>
-</body></html>`);
+    if(!win){notify("Allow popups then try again","err");return;}
+    const esc=s=>(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    const formatted=cl.split("\n").map(line=>{
+      const t=line.trim();
+      if(!t)return"<br/>";
+      if(t.startsWith("Subject:"))return"<p class='subject'>"+esc(t)+"</p>";
+      if(t.startsWith("Dear "))return"<p class='salutation'>"+esc(t)+"</p>";
+      if(t.startsWith("Warm regards")||t.startsWith("Best regards")||t.startsWith("Sincerely"))return"<p class='sign'>"+esc(t)+"</p>";
+      if(t.startsWith("[Send to"))return"<p class='sendto'>"+esc(t)+"</p>";
+      return"<p>"+esc(t)+"</p>";
+    }).join("");
+    win.document.write("<!DOCTYPE html><html><head><meta charset='UTF-8'/><title>Cover Letter — Shree Pratha Thakkar</title><style>"
+      +"@page{size:A4;margin:22mm 28mm}*{box-sizing:border-box;margin:0;padding:0}"
+      +"body{font-family:Georgia,'Times New Roman',serif;font-size:11.5pt;color:#1a1a1a;line-height:1.75;background:#fff}"
+      +"p{margin-bottom:11px}"
+      +".subject{font-weight:700;font-family:Arial,sans-serif;font-size:10pt;color:#4f46e5;border-bottom:1px solid #c7d2fe;padding-bottom:6px;margin-bottom:16px}"
+      +".salutation{font-weight:600;margin-top:8px}"
+      +".sign{margin-top:22px;font-style:italic}"
+      +".sendto{font-size:9pt;color:#6366f1;margin-top:10px;font-family:Arial,sans-serif}"
+      +"@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}"
+      +"</style></head><body>"+formatted+"<script>setTimeout(()=>window.print(),500);<\/script></body></html>");
     win.document.close();
   };
 
-  const DOCS=[
+    const DOCS=[
     {type:"cover",label:"Cover Letter",c:T.primary,bg:"#eef2ff",bc:T.primaryBorder,ico:IC.file},
     {type:"email",label:"Email Draft", c:T.pink,   bg:T.pinkLight, bc:T.pinkBorder, ico:IC.mail},
     {type:"cv",   label:"CV Tips",     c:T.green,  bg:T.greenLight,bc:T.greenBorder,ico:IC.user},
@@ -865,58 +914,154 @@ thakkarpratha@gmail.com | +91 8350925545${applyHREmail?`
           </div>
 
           <!-- OUTPUTS -->
+          <!-- SAVE TO MY JOBS BUTTON — shown when at least one output exists -->
+          ${Object.keys(applyOutputs).length>0&&(applyCompany||applyRole)&&html`
+            <div style=${{...card,background:T.amberLight,border:`1px solid ${T.amberBorder}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}} class="fade">
+              <div>
+                <p style=${{fontSize:13,fontWeight:700,color:T.amber}}>Save this job to My Jobs?</p>
+                <p style=${{fontSize:12,color:"#92400e"}}>${applyRole||"This role"} at ${applyCompany||"this company"} · ${applyCity}</p>
+              </div>
+              <button onClick=${()=>{
+                const job={id:Date.now(),title:applyRole||"Untitled Role",company:applyCompany||"Unknown Company",city:applyCity||"Bangalore",url:applyJobURL,jd:applyJD,addedAt:new Date().toLocaleDateString("en-IN")};
+                setMyJobs(p=>[job,...p]);
+                notify("Saved to My Jobs ✓");
+              }} style=${{...btnP,background:T.amber,fontSize:13,padding:"9px 18px"}}><${Ico} d=${IC.plus} s=${14} c="#fff"/> Save to My Jobs</button>
+            </div>
+          `}
+
+          <!-- CV OUTPUT -->
           ${applyOutputs.cv&&html`
-            <div style=${{...card,border:`1px solid ${T.primaryBorder}`}} class="fade">
+            <div style=${{...card,border:`2px solid ${T.primaryBorder}`}} class="fade">
               <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}}>
                 <div>
                   <p style=${{fontSize:14,fontWeight:700,color:T.primary}}>OPTIMIZED CV</p>
                   <p style=${{fontSize:11,color:T.textMuted}}>Tailored for ${applyRole||"this role"}${applyCompany?" at "+applyCompany:""}</p>
                 </div>
-                <div style=${{display:"flex",gap:8}}>
-                  <button onClick=${()=>applyCopy(applyOutputs.cv,"cv")} style=${{...btnG,fontSize:12,padding:"6px 14px",borderColor:applyCopied==="cv"?T.greenBorder:T.border,color:applyCopied==="cv"?T.green:T.textSec}}>
+                <div style=${{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <button onClick=${()=>applyCopy(applyOutputs.cv,"cv")} style=${{...btnG,fontSize:12,padding:"6px 13px",borderColor:applyCopied==="cv"?T.greenBorder:T.border,color:applyCopied==="cv"?T.green:T.textSec}}>
                     <${Ico} d=${applyCopied==="cv"?IC.check:IC.copy} s=${13} c=${applyCopied==="cv"?T.green:T.textSec}/> ${applyCopied==="cv"?"Copied!":"Copy Text"}
                   </button>
-                  <button onClick=${downloadCV} style=${{...btnP,fontSize:12,padding:"6px 16px",background:T.primary}}>
+                  <button onClick=${downloadCV} style=${{...btnP,fontSize:12,padding:"6px 14px"}}>
                     <${Ico} d=${IC.ext} s=${13} c="#fff"/> Download PDF
                   </button>
                 </div>
               </div>
-              <pre style=${{fontSize:13,lineHeight:1.8,color:T.text,whiteSpace:"pre-wrap",fontFamily:"inherit",background:"#f8fafc",padding:16,borderRadius:8,overflowX:"auto"}}>${applyOutputs.cv}</pre>
+              <pre style=${{fontSize:12.5,lineHeight:1.8,color:T.text,whiteSpace:"pre-wrap",fontFamily:"inherit",background:"#f8fafc",padding:16,borderRadius:8,overflowX:"auto",maxHeight:400,overflowY:"auto"}}>${applyOutputs.cv}</pre>
+              <!-- REFINE CV -->
+              <div style=${{borderTop:`1px solid ${T.border}`,paddingTop:14,marginTop:14}}>
+                <p style=${{fontSize:11,fontWeight:700,color:T.textMuted,marginBottom:8,letterSpacing:".06em"}}>MAKE CHANGES</p>
+                <div style=${{display:"flex",gap:8}}>
+                  <textarea placeholder="e.g. Make the summary shorter · Add more pharma keywords · Rewrite Medioint bullets to focus on compliance · Change tone to be more confident..." value=${applyRefine.cv} onInput=${e=>setApplyRefine(p=>({...p,cv:e.target.value}))} style=${{...inp,flex:1,minHeight:56,resize:"vertical"}}/>
+                  <button onClick=${async()=>{
+                    if(!applyRefine.cv.trim())return;
+                    setApplyGenerating("cv");
+                    try{
+                      const r=await callClaude([{role:"user",content:`Here is the current CV:
+
+${applyOutputs.cv}
+
+Please make these specific changes: ${applyRefine.cv}
+
+Return the complete updated CV in the same format.`}],apiKey);
+                      setApplyOutputs(p=>({...p,cv:r}));
+                      setApplyRefine(p=>({...p,cv:""}));
+                      notify("CV updated ✓");
+                    }catch(e){notify("Error: "+e.message.slice(0,50),"err");}
+                    setApplyGenerating(null);
+                  }} disabled=${!!applyGenerating||!applyRefine.cv.trim()} style=${{...btnP,padding:"8px 14px",fontSize:12,flexShrink:0,alignSelf:"flex-end",opacity:(!applyRefine.cv.trim()||!!applyGenerating)?.4:1}}>
+                    ${applyGenerating==="cv"?"Updating...":"Regenerate"}
+                  </button>
+                </div>
+              </div>
             </div>
           `}
 
+          <!-- COVER LETTER OUTPUT -->
           ${applyOutputs.cover&&html`
-            <div style=${{...card,border:`1px solid ${T.pinkBorder}`}} class="fade">
+            <div style=${{...card,border:`2px solid ${T.pinkBorder}`}} class="fade">
               <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}}>
                 <div>
                   <p style=${{fontSize:14,fontWeight:700,color:T.pink}}>COVER LETTER</p>
                   <p style=${{fontSize:11,color:T.textMuted}}>Tailored for ${applyRole||"this role"}${applyCompany?" at "+applyCompany:""}</p>
                 </div>
-                <div style=${{display:"flex",gap:8}}>
-                  <button onClick=${()=>applyCopy(applyOutputs.cover,"cover")} style=${{...btnG,fontSize:12,padding:"6px 14px",borderColor:applyCopied==="cover"?T.greenBorder:T.border,color:applyCopied==="cover"?T.green:T.textSec}}>
+                <div style=${{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  <button onClick=${()=>applyCopy(applyOutputs.cover,"cover")} style=${{...btnG,fontSize:12,padding:"6px 13px",borderColor:applyCopied==="cover"?T.greenBorder:T.border,color:applyCopied==="cover"?T.green:T.textSec}}>
                     <${Ico} d=${applyCopied==="cover"?IC.check:IC.copy} s=${13} c=${applyCopied==="cover"?T.green:T.textSec}/> ${applyCopied==="cover"?"Copied!":"Copy Text"}
                   </button>
-                  <button onClick=${downloadCoverLetter} style=${{...btnP,fontSize:12,padding:"6px 16px",background:T.pink}}>
+                  <button onClick=${downloadCoverLetter} style=${{...btnP,fontSize:12,padding:"6px 14px",background:T.pink}}>
                     <${Ico} d=${IC.ext} s=${13} c="#fff"/> Download PDF
                   </button>
                 </div>
               </div>
-              <pre style=${{fontSize:13,lineHeight:1.9,color:T.text,whiteSpace:"pre-wrap",fontFamily:"Georgia,serif",background:"#fdf2f8",padding:16,borderRadius:8}}>${applyOutputs.cover}</pre>
+              <pre style=${{fontSize:12.5,lineHeight:1.85,color:T.text,whiteSpace:"pre-wrap",fontFamily:"Georgia,serif",background:"#fdf2f8",padding:16,borderRadius:8,maxHeight:360,overflowY:"auto"}}>${applyOutputs.cover}</pre>
+              <!-- REFINE COVER LETTER -->
+              <div style=${{borderTop:`1px solid ${T.border}`,paddingTop:14,marginTop:14}}>
+                <p style=${{fontSize:11,fontWeight:700,color:T.textMuted,marginBottom:8,letterSpacing:".06em"}}>MAKE CHANGES</p>
+                <div style=${{display:"flex",gap:8}}>
+                  <textarea placeholder="e.g. Make the opening more compelling · Mention my GMP experience · Remove the third paragraph · Use a more formal tone..." value=${applyRefine.cover} onInput=${e=>setApplyRefine(p=>({...p,cover:e.target.value}))} style=${{...inp,flex:1,minHeight:56,resize:"vertical"}}/>
+                  <button onClick=${async()=>{
+                    if(!applyRefine.cover.trim())return;
+                    setApplyGenerating("cover");
+                    try{
+                      const r=await callClaude([{role:"user",content:`Here is the current cover letter:
+
+${applyOutputs.cover}
+
+Please make these changes: ${applyRefine.cover}
+
+Return the complete updated cover letter.`}],apiKey);
+                      setApplyOutputs(p=>({...p,cover:r}));
+                      setApplyRefine(p=>({...p,cover:""}));
+                      notify("Cover letter updated ✓");
+                    }catch(e){notify("Error: "+e.message.slice(0,50),"err");}
+                    setApplyGenerating(null);
+                  }} disabled=${!!applyGenerating||!applyRefine.cover.trim()} style=${{...btnP,padding:"8px 14px",fontSize:12,flexShrink:0,alignSelf:"flex-end",background:T.pink,opacity:(!applyRefine.cover.trim()||!!applyGenerating)?.4:1}}>
+                    ${applyGenerating==="cover"?"Updating...":"Regenerate"}
+                  </button>
+                </div>
+              </div>
             </div>
           `}
 
+          <!-- HR EMAIL OUTPUT -->
           ${applyOutputs.email&&html`
-            <div style=${{...card,border:`1px solid ${T.greenBorder}`}} class="fade">
+            <div style=${{...card,border:`2px solid ${T.greenBorder}`}} class="fade">
               <div style=${{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:14}}>
                 <div>
                   <p style=${{fontSize:14,fontWeight:700,color:T.green}}>HR EMAIL</p>
                   <p style=${{fontSize:11,color:T.textMuted}}>Ready to copy-paste into Gmail or Outlook</p>
                 </div>
-                <button onClick=${()=>applyCopy(applyOutputs.email,"email")} style=${{...btnG,fontSize:12,padding:"6px 14px",borderColor:applyCopied==="email"?T.greenBorder:T.border,color:applyCopied==="email"?T.green:T.textSec}}>
+                <button onClick=${()=>applyCopy(applyOutputs.email,"email")} style=${{...btnG,fontSize:12,padding:"6px 13px",borderColor:applyCopied==="email"?T.greenBorder:T.border,color:applyCopied==="email"?T.green:T.textSec}}>
                   <${Ico} d=${applyCopied==="email"?IC.check:IC.copy} s=${13} c=${applyCopied==="email"?T.green:T.textSec}/> ${applyCopied==="email"?"Copied!":"Copy Email"}
                 </button>
               </div>
-              <pre style=${{fontSize:13,lineHeight:1.8,color:T.text,whiteSpace:"pre-wrap",fontFamily:"inherit",background:T.greenLight,padding:16,borderRadius:8}}>${applyOutputs.email}</pre>
+              <pre style=${{fontSize:12.5,lineHeight:1.8,color:T.text,whiteSpace:"pre-wrap",fontFamily:"inherit",background:T.greenLight,padding:16,borderRadius:8}}>${applyOutputs.email}</pre>
+              <!-- REFINE EMAIL -->
+              <div style=${{borderTop:`1px solid ${T.border}`,paddingTop:14,marginTop:14}}>
+                <p style=${{fontSize:11,fontWeight:700,color:T.textMuted,marginBottom:8,letterSpacing:".06em"}}>MAKE CHANGES</p>
+                <div style=${{display:"flex",gap:8}}>
+                  <textarea placeholder="e.g. Make it shorter · Add a specific achievement · Change the subject line · Use a more casual tone..." value=${applyRefine.email} onInput=${e=>setApplyRefine(p=>({...p,email:e.target.value}))} style=${{...inp,flex:1,minHeight:56,resize:"vertical"}}/>
+                  <button onClick=${async()=>{
+                    if(!applyRefine.email.trim())return;
+                    setApplyGenerating("email");
+                    try{
+                      const r=await callClaude([{role:"user",content:`Here is the current email:
+
+${applyOutputs.email}
+
+Please make these changes: ${applyRefine.email}
+
+Return the complete updated email.`}],apiKey);
+                      setApplyOutputs(p=>({...p,email:r}));
+                      setApplyRefine(p=>({...p,email:""}));
+                      notify("Email updated ✓");
+                    }catch(e){notify("Error: "+e.message.slice(0,50),"err");}
+                    setApplyGenerating(null);
+                  }} disabled=${!!applyGenerating||!applyRefine.email.trim()} style=${{...btnP,padding:"8px 14px",fontSize:12,flexShrink:0,alignSelf:"flex-end",background:T.green,opacity:(!applyRefine.email.trim()||!!applyGenerating)?.4:1}}>
+                    ${applyGenerating==="email"?"Updating...":"Regenerate"}
+                  </button>
+                </div>
+              </div>
             </div>
           `}
 
