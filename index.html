@@ -226,6 +226,8 @@ function App(){
   const[applyGenerating,setApplyGenerating]=useState(null);
   const[applyOutputs,setApplyOutputs]=useState({});
   const[applyCopied,setApplyCopied]=useState(null);
+  const[applyRefine,setApplyRefine]=useState({cv:"",cover:"",email:""});
+  const[applyCity,setApplyCity]=useState("Bangalore");
 
   useEffect(()=>{localStorage.setItem("cdm_myjobs",JSON.stringify(myJobs));},[myJobs]);
   useEffect(()=>{localStorage.setItem("cdm_tracker",JSON.stringify(tracker));},[tracker]);
@@ -933,7 +935,7 @@ SKILLS TO HIGHLIGHT FOR THIS ROLE:
                 <p style=${{fontSize:11,fontWeight:700,color:T.textMuted,marginBottom:8,letterSpacing:".06em"}}>MAKE CHANGES</p>
                 <div style=${{display:"flex",gap:8}}>
                   <textarea placeholder="e.g. Make the summary shorter · Add more pharma keywords · Rewrite Medioint bullets to focus on compliance · Change tone to be more confident..." value=${applyRefine.cv} onInput=${e=>setApplyRefine(p=>({...p,cv:e.target.value}))} style=${{...inp,flex:1,minHeight:56,resize:"vertical"}}/>
-                  <button onClick=${()=>applyRefineSubmit("cv")}} disabled=${!!applyGenerating||!applyRefine.cv.trim()} style=${{...btnP,padding:"8px 14px",fontSize:12,flexShrink:0,alignSelf:"flex-end",opacity:(!applyRefine.cv.trim()||!!applyGenerating)?.4:1}}>
+                  <button onClick=${()=>applyRefineSubmit("cv")} disabled=${!!applyGenerating||!applyRefine.cv.trim()} style=${{...btnP,padding:"8px 14px",fontSize:12,flexShrink:0,alignSelf:"flex-end",opacity:(!applyRefine.cv.trim()||!!applyGenerating)?.4:1}}>
                     ${applyGenerating==="cv"?"Updating...":"Regenerate"}
                   </button>
                 </div>
@@ -964,7 +966,7 @@ SKILLS TO HIGHLIGHT FOR THIS ROLE:
                 <p style=${{fontSize:11,fontWeight:700,color:T.textMuted,marginBottom:8,letterSpacing:".06em"}}>MAKE CHANGES</p>
                 <div style=${{display:"flex",gap:8}}>
                   <textarea placeholder="e.g. Make the opening more compelling · Mention my GMP experience · Remove the third paragraph · Use a more formal tone..." value=${applyRefine.cover} onInput=${e=>setApplyRefine(p=>({...p,cover:e.target.value}))} style=${{...inp,flex:1,minHeight:56,resize:"vertical"}}/>
-                  <button onClick=${()=>applyRefineSubmit("cover")}} disabled=${!!applyGenerating||!applyRefine.cover.trim()} style=${{...btnP,padding:"8px 14px",fontSize:12,flexShrink:0,alignSelf:"flex-end",background:T.pink,opacity:(!applyRefine.cover.trim()||!!applyGenerating)?.4:1}}>
+                  <button onClick=${()=>applyRefineSubmit("cover")} disabled=${!!applyGenerating||!applyRefine.cover.trim()} style=${{...btnP,padding:"8px 14px",fontSize:12,flexShrink:0,alignSelf:"flex-end",background:T.pink,opacity:(!applyRefine.cover.trim()||!!applyGenerating)?.4:1}}>
                     ${applyGenerating==="cover"?"Updating...":"Regenerate"}
                   </button>
                 </div>
@@ -990,7 +992,7 @@ SKILLS TO HIGHLIGHT FOR THIS ROLE:
                 <p style=${{fontSize:11,fontWeight:700,color:T.textMuted,marginBottom:8,letterSpacing:".06em"}}>MAKE CHANGES</p>
                 <div style=${{display:"flex",gap:8}}>
                   <textarea placeholder="e.g. Make it shorter · Add a specific achievement · Change the subject line · Use a more casual tone..." value=${applyRefine.email} onInput=${e=>setApplyRefine(p=>({...p,email:e.target.value}))} style=${{...inp,flex:1,minHeight:56,resize:"vertical"}}/>
-                  <button onClick=${()=>applyRefineSubmit("email")}} disabled=${!!applyGenerating||!applyRefine.email.trim()} style=${{...btnP,padding:"8px 14px",fontSize:12,flexShrink:0,alignSelf:"flex-end",background:T.green,opacity:(!applyRefine.email.trim()||!!applyGenerating)?.4:1}}>
+                  <button onClick=${()=>applyRefineSubmit("email")} disabled=${!!applyGenerating||!applyRefine.email.trim()} style=${{...btnP,padding:"8px 14px",fontSize:12,flexShrink:0,alignSelf:"flex-end",background:T.green,opacity:(!applyRefine.email.trim()||!!applyGenerating)?.4:1}}>
                     ${applyGenerating==="email"?"Updating...":"Regenerate"}
                   </button>
                 </div>
@@ -1098,7 +1100,7 @@ SKILLS TO HIGHLIGHT FOR THIS ROLE:
       <p style=${{fontSize:12,color:T.textMuted}}>Made with <span style=${{color:"#ef4444",fontSize:13}}>♥</span> by SRM</p>
     </div>
 
-  </div>\`;
+  </div>`;
 }
 
 createRoot(document.getElementById("root")).render(html`<${App}/>`);
