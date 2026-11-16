@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Report</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    @media print { .noprint { display: none; } body { background: #fff; } .chart-card { break-inside: avoid; } }
+    article { line-height: 1.65; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="row noprint" style="justify-content:space-between;margin-bottom:12px">
+      <a href="/#reports">&larr; All reports</a>
+      <button onclick="window.print()">Print / save as PDF</button>
+    </div>
+    <article id="report" class="card"></article>
+  </div>
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/vendor/marked.min.js"></script>
+  <script src="/static/vendor/purify.min.js"></script>
+  <script src="/static/charts.js"></script>
+  <script>
+    (async () => {
+      const id = location.pathname.split("/").pop();
+      const r = await (await fetch(`/api/reports/${id}`)).json();
+      document.title = r.title;
+      const el = document.getElementById("report");
+      // Charts are referenced as [[chart:ID]]; swap them for placeholders before rendering Markdown.
+      const md = r.markdown.replace(/\[\[chart:(\d+)\]\]/g, (_, cid) => `\n\n<div class="chart-slot" data-id="${cid}"></div>\n\n`);
+      AE.renderMarkdown(el, `# ${r.title}\n\n` + md);
+      for (const slot of el.querySelectorAll(".chart-slot")) {
+        const res = await fetch(`/api/charts/${slot.dataset.id}`);
+        if (res.ok) AE.renderChart(slot, (await res.json()).spec);
+      }
+    })();
+  </script>
+</body>
+</html>
