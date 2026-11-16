@@ -49,6 +49,20 @@ main { overflow: auto; }
 .list-item:hover { background: var(--soft); }
 .score { font-size: 40px; font-weight: 700; }
 
+/* audits */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 6px 0 12px; flex-wrap: wrap; }
+.tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 8px 12px; color: var(--muted); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.finding { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+.finding-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.finding-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; font-size: 14px; }
+.label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 2px; }
+.tag-chip { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--soft); color: var(--muted); }
+.tag-chip.ok { color: var(--ok); }
+table.compact th, table.compact td { padding: 5px 8px; font-size: 13px; }
+td.details { word-break: break-word; max-width: 420px; }
+ul.evidence { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
+
 /* chat */
 .chat { display: grid; grid-template-columns: 240px 1fr; height: 100vh; }
 .convs { border-right: 1px solid var(--border); overflow: auto; padding: 12px; background: var(--panel); }
@@ -93,6 +107,6 @@ main { overflow: auto; }
   .thread-wrap { height: 100%; }
   .composer { padding: 10px 16px; }
   .page { padding: 16px; }
-  .grid, .diff { grid-template-columns: 1fr; }
+  .grid, .diff, .finding-grid { grid-template-columns: 1fr; }
   .msg.user { margin-left: 0; }
 }

@@ -18,6 +18,7 @@ from ..audit.fixes import build_changeset
 from ..audit.rules import run_audit
 from ..charts import build_chart
 from ..context import AppContext
+from ..ga4_audit import run_ga4_audit
 
 PROPERTY = r"^properties/\d+$"
 CONTAINER = r"^accounts/\d+/containers/\d+$"
@@ -153,7 +154,7 @@ TOOLS = [
     Tool("ga4_get_metadata", "List dimensions and metrics (including custom definitions) available in a GA4 property. Use it before a report if you're unsure of an API name.", PropertyIn),
     Tool("ga4_run_report", "Run a GA4 report. Returns up to 100 rows plus a result_id for charts; warnings flag thresholding, sampling and '(other)' rows.", RunReportIn),
     Tool("ga4_run_realtime_report", "Realtime report for the last 30 minutes. Useful to confirm a tag change is sending data.", RealtimeIn),
-    Tool("ga4_audit_property", "Read a GA4 property's configuration (retention, streams, key events, custom definitions, enhanced measurement, Ads links) and check it against best practice.", PropertyIn),
+    Tool("ga4_audit_property", "Audit a GA4 property: configuration (retention, streams, key events, custom definitions, enhanced measurement, Ads links) and 28-day data quality (unassigned traffic, self/payment referrals, PII in URLs, event-name variants, silent key events, duplicate transactions). Saves the audit; the user can open it and download Excel.", PropertyIn),
     Tool("render_chart", "Show a chart of a report result to the user, inline in the chat. Returns a chart id that reports can embed.", ChartIn),
     Tool("save_dashboard", "Save a dashboard of live GA4 widgets. Each widget re-runs its report whenever the dashboard is opened.", DashboardIn),
     Tool("save_report", "Save a written report (Markdown, may embed charts) that the user can open, print or save as PDF.", ReportIn),
@@ -259,7 +260,11 @@ async def _realtime(ctx, cid, a: RealtimeIn):
 
 
 async def _audit_property(ctx, cid, a: PropertyIn):
-    return ToolOutcome(_json(await asyncio.to_thread(ctx.ga4.property_config, a.property)))
+    result = await asyncio.to_thread(run_ga4_audit, ctx.ga4, a.property)
+    aid = ctx.store.save_ga4_audit(result)
+    out = {k: v for k, v in result.items() if k not in ("top_events",)}
+    return ToolOutcome(_json({"ga4_audit_id": aid, **out}),
+                       events=[{"type": "ga4audit", "id": aid, "score": result["score"], "container": result["property_name"]}])
 
 
 async def _render_chart(ctx, cid, a: ChartIn):

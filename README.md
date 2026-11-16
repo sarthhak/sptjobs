@@ -8,12 +8,21 @@ installed on your office laptop.
 - Ask questions in plain English: "Why did conversions drop last week?", "Which landing pages underperform?"
 - Get analysis with charts, period comparisons and recommendations.
 - Ask for a written report (printable / save as PDF) or a dashboard of live GA4 widgets.
-- Check GA4 property settings (retention, key events, custom definitions, enhanced measurement).
+
+**GA4 audits**
+- Settings: data retention, key events, streams, enhanced measurement, custom definitions and limits, currency, Ads links.
+- Data quality over the last 28 days: Unassigned traffic, self-referrals and payment-gateway referrals,
+  (not set) sources and landing pages, personal data in URLs, event-name variants, key events that never fire,
+  purchases without revenue, duplicate or missing transaction IDs, thresholding.
+- Each finding explains what's happening, why it matters, how to fix it and who owns it, with evidence. Download as Excel.
 
 **GTM audits and fixes**
 - Audit the live container: 20+ checks covering broken references, duplicate tags, invalid GA4 event and parameter
   names, missing measurement IDs, ecommerce data, Universal Analytics leftovers, risky custom HTML, consent,
   conversion linker, catch-all triggers, unused items, naming and folders. Each audit gets a health score.
+- Every finding shows the affected tags/triggers/variables with their type, triggers and settings, plus why it matters
+  and how to fix it. Full inventory tabs (tags, triggers with conditions, variables with where they're used).
+  Download the whole audit as Excel.
 - Automatic fixes for the mechanical problems, plus change sets the assistant drafts for anything else.
 - Review a before/after diff, apply it to a **new** GTM workspace, check it in GTM Preview, then publish, with
   one-click rollback.

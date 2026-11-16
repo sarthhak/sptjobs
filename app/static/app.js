@@ -30,7 +30,7 @@ async function loadStatus() {
 async function route() {
   const [name, id] = (location.hash.slice(1) || "chat").split("/");
   setNav(name);
-  const pages = { chat: chatPage, audits: auditsPage, changes: changesPage, dashboards: dashboardsPage, reports: reportsPage, settings: settingsPage };
+  const pages = { chat: chatPage, audits: auditsPage, ga4audits: ga4AuditsPage, changes: changesPage, dashboards: dashboardsPage, reports: reportsPage, settings: settingsPage };
   try {
     await (pages[name] || chatPage)(id);
   } catch (e) {
@@ -46,7 +46,7 @@ const EXAMPLES = [
   "Which landing pages have the worst engagement rate with meaningful traffic?",
   "Audit my GTM container and tell me what to fix first.",
   "Build a dashboard with traffic by channel, daily users and top landing pages.",
-  "Check my GA4 property settings against best practice.",
+  "Audit my GA4 property and tell me what to fix first.",
 ];
 
 async function chatPage(id) {
@@ -108,6 +108,7 @@ function eventCard(ev) {
   div.className = "event";
   if (ev.type === "changeset") div.innerHTML = `<b>Change set #${ev.id} proposed.</b> Nothing has changed in GTM yet. <a href="#changes/${ev.id}">Review it</a>`;
   else if (ev.type === "audit") div.innerHTML = `<b>Audit #${ev.id}</b>${ev.container ? " of " + esc(ev.container) : ""}${ev.score != null ? ` scored ${ev.score}/100` : ""}. <a href="#audits/${ev.id}">Open the findings</a>`;
+  else if (ev.type === "ga4audit") div.innerHTML = `<b>GA4 audit #${ev.id}</b>${ev.container ? " of " + esc(ev.container) : ""}${ev.score != null ? ` scored ${ev.score}/100` : ""}. <a href="#ga4audits/${ev.id}">Open the findings</a>`;
   else if (ev.type === "report") div.innerHTML = `<b>Report saved.</b> <a href="/reports/${ev.id}" target="_blank">Open report #${ev.id}</a>`;
   else if (ev.type === "dashboard") div.innerHTML = `<b>Dashboard saved.</b> <a href="#dashboards/${ev.id}">Open dashboard #${ev.id}</a>`;
   return div;
@@ -176,7 +177,7 @@ async function sendMessage(cid, text, thread) {
           status.textContent = ev.ok ? "Thinking..." : `${ev.name} returned an error; continuing...`;
         } else if (ev.type === "chart") {
           const holder = document.createElement("div"); thread.insertBefore(holder, status); renderChart(holder, ev.spec);
-        } else if (["changeset", "audit", "report", "dashboard"].includes(ev.type)) {
+        } else if (["changeset", "audit", "ga4audit", "report", "dashboard"].includes(ev.type)) {
           thread.insertBefore(eventCard(ev), status);
         } else if (ev.type === "error") {
           const d = document.createElement("div"); d.className = "banner"; d.textContent = ev.message; thread.insertBefore(d, status);
@@ -194,7 +195,63 @@ async function sendMessage(cid, text, thread) {
   }
 }
 
-// ---------------------------------------------------------------- audits
+// ---------------------------------------------------------------- audits (shared pieces)
+const SEVERITIES = ["critical", "high", "medium", "low", "info"];
+
+function scoreCard(score, counts, sub) {
+  const pills = SEVERITIES.filter((s) => counts[s]).map((s) => `${sevPill(s)} ${counts[s]}`).join(" &nbsp; ");
+  return `<div class="card row" style="gap:28px">
+    <div><div class="score">${score}</div><div class="muted">health score / 100</div></div>
+    <div>${pills || "No findings"}<div class="muted" style="margin-top:6px">${sub}</div></div></div>`;
+}
+
+function filterBar(id) {
+  return `<div class="row" style="margin:10px 0">
+    <select id="${id}-sev"><option value="">All severities</option>${SEVERITIES.map((s) => `<option>${s}</option>`).join("")}</select>
+    <input id="${id}-q" placeholder="Search names, details..." style="flex:1;min-width:200px"></div>`;
+}
+
+function wireFilter(id, selector) {
+  const apply = () => {
+    const sev = document.getElementById(`${id}-sev`)?.value || "";
+    const q = (document.getElementById(`${id}-q`)?.value || "").toLowerCase();
+    view.querySelectorAll(selector).forEach((el) => {
+      const okSev = !sev || el.dataset.sev === sev;
+      el.style.display = okSev && (!q || el.textContent.toLowerCase().includes(q)) ? "" : "none";
+    });
+  };
+  document.getElementById(`${id}-sev`)?.addEventListener("change", apply);
+  document.getElementById(`${id}-q`)?.addEventListener("input", apply);
+}
+
+function tabs(names) {
+  return `<div class="tabs">${names.map(([key, label], i) => `<button class="tab ${i ? "" : "active"}" data-tab="${key}">${label}</button>`).join("")}</div>`;
+}
+
+function wireTabs() {
+  view.querySelectorAll(".tab").forEach((b) => b.onclick = () => {
+    view.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
+    view.querySelectorAll("[data-panel]").forEach((p) => p.style.display = p.dataset.panel === b.dataset.tab ? "" : "none");
+  });
+}
+
+const list = (items) => (items && items.length ? items.map((x) => `<div>${esc(x)}</div>`).join("") : '<span class="muted">-</span>');
+
+function findingCard(f, i, extra = "") {
+  return `<div class="finding" data-sev="${f.severity}">
+    <div class="finding-head">
+      ${f.fixable ? `<input type="checkbox" value="${esc(f.id)}" title="Include the automatic fix">` : ""}
+      <span class="muted">#${i}</span> ${sevPill(f.severity)} <b>${esc(f.title)}</b>
+      <span class="tag-chip">${esc(f.category || "")}</span>${f.fixable ? '<span class="tag-chip ok">Auto-fix available</span>' : ""}
+    </div>
+    <div class="finding-grid">
+      <div><div class="label">What's happening</div>${esc(f.detail)}</div>
+      <div><div class="label">Why it matters</div>${esc(f.impact || "")}</div>
+      <div><div class="label">How to fix</div>${esc(f.recommendation)}<div class="muted" style="margin-top:4px">Owner: ${esc(f.owner || "")}</div></div>
+    </div>${extra}</div>`;
+}
+
+// ---------------------------------------------------------------- GTM audits
 async function auditsPage(id) {
   if (id) return auditDetail(id);
   const audits = await api("/api/audits");
@@ -209,7 +266,7 @@ async function auditsPage(id) {
       <p class="muted" style="margin-bottom:0">Audits read the live (published) container version. They never change anything.</p>
     </div>
     <div class="card" style="padding:0">${audits.length ? audits.map((a) => `
-      <div class="list-item" data-id="${a.id}"><span><b>#${a.id}</b> ${esc(a.container_name)} <span class="muted">v${esc(a.version_id)}</span></span>
+      <div class="list-item" data-id="${a.id}"><span><b>#${a.id}</b> ${esc(a.container_name)} <span class="muted">version ${esc(a.version_id)}</span></span>
       <span>${a.score}/100 <span class="muted">${when(a.created)}</span></span></div>`).join("") : '<p class="muted" style="padding:12px">No audits yet.</p>'}</div>
   </div>`;
   view.querySelectorAll(".list-item").forEach((el) => el.onclick = () => location.hash = `audits/${el.dataset.id}`);
@@ -225,40 +282,121 @@ async function auditsPage(id) {
   };
 }
 
+function affectedTable(items) {
+  if (!items || !items.length) return "";
+  return `<div style="overflow-x:auto;margin-top:10px"><table class="compact"><thead><tr><th>Item</th><th>Name</th><th>Type</th><th>Status</th><th>Fires on</th><th>Details</th></tr></thead><tbody>
+    ${items.map((a) => `<tr><td>${esc(a.kind)}</td><td><b>${esc(a.name)}</b> <span class="muted">#${esc(a.id)}</span></td><td>${esc(a.type)}</td>
+      <td>${esc(a.status || "")}</td><td>${esc(a.triggers || "")}</td><td class="details">${esc(a.details || "")}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
 async function auditDetail(id) {
   const a = await api(`/api/audits/${id}`);
-  const counts = Object.entries(a.counts).filter(([, n]) => n).map(([s, n]) => `${sevPill(s)} ${n}`).join(" &nbsp; ");
+  const inv = a.inventory;
+  const issueCell = (xs) => xs.length ? `<span class="pill sev-high" title="${esc(xs.join("\n"))}">${xs.length}</span>` : "";
   view.innerHTML = `<div class="page">
-    <p><a href="#audits">&larr; Audits</a></p>
-    <h1>${esc(a.container)} <span class="muted">(${esc(a.public_id)}, version ${esc(a.version_id)})</span></h1>
-    <div class="card row" style="gap:28px">
-      <div><div class="score">${a.score}</div><div class="muted">health score</div></div>
-      <div>${counts || "No findings"}<div class="muted" style="margin-top:6px">${a.totals.tags} tags, ${a.totals.triggers} triggers, ${a.totals.variables} variables. Run ${when(a.created)}.</div></div>
+    <p><a href="#audits">&larr; GTM audits</a></p>
+    <div class="row" style="justify-content:space-between">
+      <h1>${esc(a.container)} <span class="muted">(${esc(a.public_id)}, version ${esc(a.version_id)})</span></h1>
+      <a href="/api/audits/${id}/export.xlsx"><button>Download Excel</button></a>
     </div>
-    <div class="card">
+    ${scoreCard(a.score, a.counts, `${a.totals.tags} tags, ${a.totals.triggers} triggers, ${a.totals.variables} variables. Run ${when(a.created)}.`)}
+    ${tabs([["findings", `Findings (${a.findings.length})`], ["tags", `Tags (${inv.tags.length})`], ["triggers", `Triggers (${inv.triggers.length})`], ["variables", `Variables (${inv.variables.length})`]])}
+    <div data-panel="findings">
       <div class="row" style="justify-content:space-between">
-        <b>Findings</b>
-        <span class="row"><button id="selectFixable">Select all fixable</button><button class="primary" id="propose">Create change set from selected</button></span>
+        ${filterBar("f")}
+        <span class="row"><button id="selectFixable">Select all auto-fixes</button><button class="primary" id="propose">Create change set from selected</button></span>
       </div>
-      <table style="margin-top:10px"><thead><tr><th></th><th>Severity</th><th>Finding</th><th>Recommendation</th></tr></thead><tbody>
-      ${a.findings.map((f) => `<tr>
-        <td>${f.fixable ? `<input type="checkbox" value="${esc(f.id)}">` : ""}</td>
-        <td>${sevPill(f.severity)}</td>
-        <td><b>${esc(f.title)}</b><div class="muted">${esc(f.detail)}</div></td>
-        <td>${esc(f.recommendation)}${f.fixable ? '<div class="muted">Automatic fix available</div>' : ""}</td></tr>`).join("")}
-      </tbody></table>
-    </div></div>`;
-  const boxes = () => [...view.querySelectorAll("input[type=checkbox]")];
+      ${a.findings.map((f, i) => findingCard(f, i + 1, affectedTable(f.affected))).join("") || '<p class="muted">No findings. Nice.</p>'}
+    </div>
+    <div data-panel="tags" style="display:none"><div class="card" style="overflow-x:auto"><table class="compact">
+      <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Fires on</th><th>Blocked by</th><th>Consent</th><th>Details</th><th>Issues</th></tr></thead><tbody>
+      ${inv.tags.map((t) => `<tr><td><b>${esc(t.name)}</b><div class="muted">#${esc(t.id)}${t.folder ? " · " + esc(t.folder) : ""}</div></td><td>${esc(t.type)}</td><td>${esc(t.status)}</td>
+        <td>${list(t.fires_on)}</td><td>${list(t.blocked_by)}</td><td>${esc(t.consent)}</td><td class="details">${esc(t.details)}</td><td>${issueCell(t.issues)}</td></tr>`).join("")}
+    </tbody></table></div></div>
+    <div data-panel="triggers" style="display:none"><div class="card" style="overflow-x:auto"><table class="compact">
+      <thead><tr><th>Name</th><th>Type</th><th>Conditions</th><th>Used by tags</th><th>Issues</th></tr></thead><tbody>
+      ${inv.triggers.map((t) => `<tr><td><b>${esc(t.name)}</b><div class="muted">#${esc(t.id)}${t.folder ? " · " + esc(t.folder) : ""}</div></td><td>${esc(t.type)}</td>
+        <td class="details">${esc(t.conditions)}</td><td>${list(t.used_by)}</td><td>${issueCell(t.issues)}</td></tr>`).join("")}
+    </tbody></table>
+    <p class="muted">Built-in triggers in use: ${esc(inv.built_in_triggers_used.join(", ") || "none")}</p></div></div>
+    <div data-panel="variables" style="display:none"><div class="card" style="overflow-x:auto"><table class="compact">
+      <thead><tr><th>Name</th><th>Type</th><th>Details</th><th>Used by</th><th>Issues</th></tr></thead><tbody>
+      ${inv.variables.map((v) => `<tr><td><b>${esc(v.name)}</b><div class="muted">#${esc(v.id)}${v.folder ? " · " + esc(v.folder) : ""}</div></td><td>${esc(v.type)}</td>
+        <td class="details">${esc(v.details)}</td><td>${list(v.used_by)}</td><td>${issueCell(v.issues)}</td></tr>`).join("")}
+    </tbody></table>
+    <p class="muted">Enabled built-in variables: ${esc(inv.built_in_variables.join(", ") || "none")}</p></div></div>
+  </div>`;
+  wireTabs();
+  wireFilter("f", ".finding");
+  const boxes = () => [...view.querySelectorAll(".finding input[type=checkbox]")];
   document.getElementById("selectFixable").onclick = () => boxes().forEach((b) => b.checked = true);
   document.getElementById("propose").onclick = async () => {
     const ids = boxes().filter((b) => b.checked).map((b) => b.value);
-    if (!ids.length) return alert("Select at least one finding with an automatic fix.");
+    if (!ids.length) return alert("Tick at least one finding that has an automatic fix.");
     try {
       const r = await post(`/api/audits/${id}/changeset`, { finding_ids: ids });
       if (r.errors?.length) alert("Some fixes were skipped:\n" + r.errors.join("\n"));
       location.hash = `changes/${r.id}`;
     } catch (e) { alert(e.message); }
   };
+}
+
+// ---------------------------------------------------------------- GA4 audits
+async function ga4AuditsPage(id) {
+  if (id) return ga4AuditDetail(id);
+  const audits = await api("/api/ga4-audits");
+  view.innerHTML = `<div class="page">
+    <h1>GA4 audits</h1>
+    <div class="card">
+      <div class="row">
+        <select id="property" style="min-width:320px"><option>Loading properties...</option></select>
+        <button class="primary" id="run">Run audit</button>
+        <span class="muted" id="runStatus"></span>
+      </div>
+      <p class="muted" style="margin-bottom:0">Checks the property's settings and the quality of the last 28 days of data. Read-only.</p>
+    </div>
+    <div class="card" style="padding:0">${audits.length ? audits.map((a) => `
+      <div class="list-item" data-id="${a.id}"><span><b>#${a.id}</b> ${esc(a.property_name)} <span class="muted">${esc(a.property)}</span></span>
+      <span>${a.score}/100 <span class="muted">${when(a.created)}</span></span></div>`).join("") : '<p class="muted" style="padding:12px">No GA4 audits yet.</p>'}</div>
+  </div>`;
+  view.querySelectorAll(".list-item").forEach((el) => el.onclick = () => location.hash = `ga4audits/${el.dataset.id}`);
+  const sel = document.getElementById("property");
+  try {
+    const ps = await api("/api/properties");
+    sel.innerHTML = ps.map((p) => `<option value="${esc(p.property)}">${esc(p.account)} / ${esc(p.property_name)} (${esc(p.property)})</option>`).join("") || "<option>No properties found</option>";
+  } catch (e) { sel.innerHTML = `<option>${esc(e.message)}</option>`; }
+  document.getElementById("run").onclick = async () => {
+    document.getElementById("runStatus").textContent = "Running... (about 10-30 seconds)";
+    try { const a = await post("/api/ga4-audits", { property: sel.value }); location.hash = `ga4audits/${a.id}`; }
+    catch (e) { document.getElementById("runStatus").textContent = e.message; }
+  };
+}
+
+async function ga4AuditDetail(id) {
+  const a = await api(`/api/ga4-audits/${id}`);
+  const ov = a.overview || {};
+  const num = (v) => (typeof v === "number" ? fmt.format(v) : "-");
+  const evidence = (f) => f.evidence?.length ? `<div style="margin-top:10px"><div class="label">Evidence</div><ul class="evidence">${f.evidence.map((e) => `<li>${esc(e)}</li>`).join("")}</ul></div>` : "";
+  view.innerHTML = `<div class="page">
+    <p><a href="#ga4audits">&larr; GA4 audits</a></p>
+    <div class="row" style="justify-content:space-between">
+      <h1>${esc(a.property_name)} <span class="muted">(${esc(a.property)})</span></h1>
+      <a href="/api/ga4-audits/${id}/export.xlsx"><button>Download Excel</button></a>
+    </div>
+    ${scoreCard(a.score, a.counts, `${esc(a.period)}: ${num(ov.sessions)} sessions, ${num(ov.totalUsers)} users, ${typeof ov.engagementRate === "number" ? (ov.engagementRate * 100).toFixed(1) + "%" : "-"} engagement, ${num(ov.keyEvents)} key events. Run ${when(a.created)}.`)}
+    ${Object.keys(a.errors || {}).length ? `<div class="banner">Some checks could not run: ${esc(Object.entries(a.errors).map(([k, v]) => `${k} (${v})`).join("; "))}</div>` : ""}
+    ${tabs([["findings", `Findings (${a.findings.length})`], ["settings", "Property settings"], ["data", "Traffic & events"]])}
+    <div data-panel="findings">${filterBar("g")}
+      ${a.findings.map((f, i) => findingCard(f, i + 1, evidence(f))).join("") || '<p class="muted">No findings. Nice.</p>'}</div>
+    <div data-panel="settings" style="display:none"><div class="card"><table class="compact">
+      ${Object.entries(a.settings).map(([k, v]) => `<tr><th style="width:220px">${esc(k)}</th><td class="details">${esc(v || "-")}</td></tr>`).join("")}</table></div></div>
+    <div data-panel="data" style="display:none"><div class="grid">
+      <div class="card"><b>Sessions by channel</b><table class="compact">${(a.channels || []).map((r) => `<tr><td>${esc(r.sessionDefaultChannelGroup)}</td><td class="num">${num(r.sessions)}</td></tr>`).join("")}</table></div>
+      <div class="card"><b>Events</b><table class="compact">${(a.top_events || []).map((r) => `<tr><td>${esc(r.eventName)}</td><td class="num">${num(r.eventCount)}</td></tr>`).join("")}</table></div>
+    </div></div>
+  </div>`;
+  wireTabs();
+  wireFilter("g", ".finding");
 }
 
 // ---------------------------------------------------------------- change sets

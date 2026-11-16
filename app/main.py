@@ -6,12 +6,13 @@ import asyncio
 import hmac
 import json
 import logging
+import re
 import secrets
 from pathlib import Path
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
@@ -19,6 +20,9 @@ from .agent.loop import run_turn
 from .agent.tools import run_gtm_audit, strip_snapshot
 from .audit.apply import ApplyError, apply_changeset, publish_workspace, rollback
 from .audit.container import Container
+from .audit.describe import enrich_findings, inventory
+from .export import ga4_audit_xlsx, gtm_audit_xlsx
+from .ga4_audit import run_ga4_audit
 from .audit.fixes import build_changeset
 from .charts import build_chart
 from .config import load_settings
@@ -27,6 +31,7 @@ from .google_oauth import OAuthError, authorization_url, exchange_code, save_tok
 
 log = logging.getLogger("analytics_expert")
 STATIC = Path(__file__).parent / "static"
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 SESSION_COOKIE = "ae_session"
 SESSION_MAX_AGE = 7 * 24 * 3600
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}
@@ -235,10 +240,10 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
                     chart = ctx.store.get_chart(data["chart_id"])
                     if chart:
                         items.append({"role": "event", "type": "chart", "id": chart["id"], "spec": chart["spec"]})
-                for key, typ in (("changeset_id", "changeset"), ("report_id", "report"), ("dashboard_id", "dashboard"), ("audit_id", "audit")):
+                for key, typ in (("changeset_id", "changeset"), ("report_id", "report"), ("dashboard_id", "dashboard"), ("audit_id", "audit"), ("ga4_audit_id", "ga4audit")):
                     if key in data:
                         items.append({"role": "event", "type": typ, "id": data[key], "score": data.get("score"),
-                                      "container": data.get("container")})
+                                      "container": data.get("container") or data.get("property_name")})
         return {"conversation": conv, "items": items}
 
     @app.post("/api/conversations/{cid}/chat")
@@ -304,12 +309,57 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
             raise HTTPException(502, f"Audit failed: {e}")
         return {"id": audit_id, **strip_snapshot(result)}
 
-    @app.get("/api/audits/{aid}")
-    async def audit(aid: int):
+    def _full_audit(aid: int) -> dict:
         a = ctx.store.get_audit(aid)
         if not a:
             raise HTTPException(404)
-        return {**{k: v for k, v in a.items() if k != "result"}, **strip_snapshot(a["result"])}
+        c = Container(a["result"]["version_snapshot"])
+        out = {**{k: v for k, v in a.items() if k != "result"}, **strip_snapshot(a["result"])}
+        out["findings"] = enrich_findings(c, out["findings"])
+        out["inventory"] = inventory(c, out["findings"])
+        return out
+
+    @app.get("/api/audits/{aid}")
+    async def audit(aid: int):
+        return _full_audit(aid)
+
+    @app.get("/api/audits/{aid}/export.xlsx")
+    async def audit_export(aid: int):
+        a = _full_audit(aid)
+        name = re.sub(r"[^A-Za-z0-9_-]+", "-", f"gtm-audit-{a.get('public_id') or a['container']}-{aid}")
+        return Response(gtm_audit_xlsx(a), media_type=XLSX, headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'})
+
+    # -- GA4 audits -------------------------------------------------------------------
+    @app.get("/api/ga4-audits")
+    async def ga4_audits():
+        return ctx.store.list_ga4_audits()
+
+    @app.post("/api/ga4-audits")
+    async def new_ga4_audit(request: Request):
+        prop = (await request.json()).get("property", "")
+        if not re.fullmatch(r"properties/\d+", prop):
+            raise HTTPException(400, "property must look like properties/123456789")
+        try:
+            result = await asyncio.to_thread(run_ga4_audit, ctx.ga4, prop)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(502, f"GA4 audit failed: {e}")
+        return {"id": ctx.store.save_ga4_audit(result)}
+
+    def _ga4_audit(aid: int) -> dict:
+        a = ctx.store.get_ga4_audit(aid)
+        if not a:
+            raise HTTPException(404)
+        return {"id": a["id"], "created": a["created"], **a["result"]}
+
+    @app.get("/api/ga4-audits/{aid}")
+    async def ga4_audit(aid: int):
+        return _ga4_audit(aid)
+
+    @app.get("/api/ga4-audits/{aid}/export.xlsx")
+    async def ga4_audit_export(aid: int):
+        a = _ga4_audit(aid)
+        name = re.sub(r"[^A-Za-z0-9_-]+", "-", f"ga4-audit-{a['property_name']}-{aid}")
+        return Response(ga4_audit_xlsx(a), media_type=XLSX, headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'})
 
     @app.post("/api/audits/{aid}/changeset")
     async def changeset_from_audit(aid: int, request: Request):

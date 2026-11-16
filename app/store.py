@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS changesets (id INTEGER PRIMARY KEY, container_path TE
     status TEXT, summary TEXT, ops TEXT, errors TEXT, log TEXT, workspace_path TEXT, workspace_url TEXT,
     version_path TEXT, previous_version_path TEXT, created REAL, updated REAL);
 CREATE TABLE IF NOT EXISTS dashboards (id INTEGER PRIMARY KEY, name TEXT, description TEXT, property TEXT, widgets TEXT, created REAL);
+CREATE TABLE IF NOT EXISTS ga4_audits (id INTEGER PRIMARY KEY, property TEXT, property_name TEXT, score INTEGER, result TEXT, created REAL);
 CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY, conversation_id INTEGER, title TEXT, markdown TEXT, created REAL);
 """
 
@@ -127,6 +128,16 @@ class Store:
 
     def list_audits(self) -> list[dict]:
         return self._list("SELECT id, container_path, container_name, version_id, score, created FROM audits ORDER BY id DESC")
+
+    def save_ga4_audit(self, result: dict) -> int:
+        return self._insert("ga4_audits", property=result["property"], property_name=result.get("property_name"),
+                            score=result.get("score"), result=result)
+
+    def get_ga4_audit(self, aid: int) -> dict | None:
+        return self._get("ga4_audits", aid)
+
+    def list_ga4_audits(self) -> list[dict]:
+        return self._list("SELECT id, property, property_name, score, created FROM ga4_audits ORDER BY id DESC")
 
     # -- change sets -----------------------------------------------------------
     def create_changeset(self, **values: Any) -> int:
