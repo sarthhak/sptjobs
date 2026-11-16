@@ -36,6 +36,8 @@ class Settings:
     data_dir: Path = Path("data")
     # Google auth: a service-account key file, or an OAuth user token created by scripts/google_login.py
     google_service_account_file: Path | None = None
+    # Or the key's JSON pasted into an environment variable (for hosts without file uploads)
+    google_service_account_json: str | None = None
     google_token_file: Path = Path("data/google_token.json")
     # GTM write safety switch: apply/publish endpoints refuse to run unless this is true
     allow_gtm_writes: bool = False
@@ -69,6 +71,7 @@ def load_settings() -> Settings:
         session_secret=secret,
         data_dir=data_dir,
         google_service_account_file=_path("GOOGLE_SERVICE_ACCOUNT_FILE"),
+        google_service_account_json=os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON") or None,
         google_token_file=_path("GOOGLE_TOKEN_FILE") or data_dir / "google_token.json",
         allow_gtm_writes=_bool("ALLOW_GTM_WRITES", False),
         gtm_write_interval=float(os.environ.get("GTM_WRITE_INTERVAL", "4")),

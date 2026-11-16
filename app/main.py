@@ -40,7 +40,8 @@ def build_default_context() -> AppContext:
     from .verify import verify_site
 
     settings = load_settings()
-    creds = GoogleCredentials(settings.google_service_account_file, settings.google_token_file)
+    creds = GoogleCredentials(settings.google_service_account_file, settings.google_token_file,
+                               settings.google_service_account_json)
 
     def google_status() -> str:
         try:

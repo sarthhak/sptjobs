@@ -43,7 +43,7 @@ In a Google Cloud project, enable **Google Analytics Data API**, **Google Analyt
 
 - **Service account (recommended for a server).** Create a service account and download a JSON key. Add
   its email address as a user in GA4 (Property access management, **Viewer**) and in GTM (container user,
-  **Publish** permission, or **Read** if you only want audits). Set `GOOGLE_SERVICE_ACCOUNT_FILE` to the key path.
+  **Publish** permission, or **Read** if you only want audits). Paste the key file's contents into `GOOGLE_SERVICE_ACCOUNT_JSON` (or set `GOOGLE_SERVICE_ACCOUNT_FILE` to its path).
 - **Your own Google login.** Create an OAuth client of type *Desktop app*, download `client_secret.json`, then
   on a computer with a browser run `python scripts/google_login.py --client-secret client_secret.json`. Copy the
   resulting `data/google_token.json` to the server.
@@ -58,16 +58,35 @@ uvicorn app.main:app_factory --factory --port 8000
 ```
 Open http://localhost:8000. Without `APP_PASSWORD`, the app only accepts connections from the same machine.
 
-### Hosting (to use it from your office laptop)
-Run it on a small always-on machine you control, for example a cloud VM:
+### Hosting on Railway (recommended, to use it from your office laptop)
+Railway builds the app from this GitHub repo, keeps its data on a persistent volume, and gives you an
+HTTPS address. Everything is done in the browser.
+
+1. Sign up at railway.com with GitHub and choose the Hobby plan.
+2. **New Project > Deploy from GitHub repo**, pick this repository (and this branch, until it's merged).
+   Railway finds the `Dockerfile` and `railway.toml` by itself.
+3. In the service, open **Variables** and add:
+   - `ANTHROPIC_API_KEY` - your Claude API key
+   - `APP_PASSWORD` - a long password for logging in
+   - `GOOGLE_SERVICE_ACCOUNT_JSON` - open the service-account key file and paste its whole contents
+   - `DATA_DIR` = `/data`
+   - `ALLOW_GTM_WRITES` = `false` for now
+4. Right-click the service > **Attach volume**, mount path `/data`. This keeps conversations, audits and
+   change sets across deploys.
+5. **Settings > Networking > Generate Domain**. Open that address from any browser and log in.
+
+Pushing to the branch redeploys automatically. When you're ready for the app to apply and publish GTM
+changes, set `ALLOW_GTM_WRITES` to `true`.
+
+### Hosting anywhere else
+Any machine that runs Docker works:
 ```bash
 docker build -t analytics-expert .
-docker run -d -p 8000:8000 --env-file .env -v $PWD/data:/data \
-  -v /path/to/key.json:/secrets/key.json -e GOOGLE_SERVICE_ACCOUNT_FILE=/secrets/key.json analytics-expert
+docker run -d -p 8000:8000 --env-file .env -v $PWD/data:/data -e DATA_DIR=/data analytics-expert
 ```
-Put HTTPS in front of it (Caddy or nginx, or a managed load balancer) and always set `APP_PASSWORD`. Conversations,
-audits and change sets live in SQLite under `DATA_DIR`, so use a persistent disk. Serverless platforms that
-wipe the disk on restart are a poor fit unless you mount a volume.
+Put HTTPS in front of it (Caddy or nginx, or a managed load balancer) and always set `APP_PASSWORD`. Data lives in
+SQLite under `DATA_DIR`, so use a persistent disk. Serverless platforms such as Vercel wipe the disk and cap
+request time, so they would need a hosted database and other changes.
 
 ## Limits worth knowing
 

@@ -79,3 +79,23 @@ def test_verify_site_intercepts_ga4_hits():
     scroll = next(h for h in result["ga4_hits"] if h["event"] == "scroll")
     assert scroll["params"] == {"percent_scrolled": "90"}
     assert {"event": "add_to_cart"} in result["data_layer"]
+
+
+def test_service_account_json_from_env_variable(tmp_path):
+    import json
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    from app.google_auth import GoogleAuthMissing, GoogleCredentials
+
+    pem = rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()
+    info = {"type": "service_account", "project_id": "p", "private_key_id": "k", "private_key": pem,
+            "client_email": "bot@p.iam.gserviceaccount.com", "client_id": "1", "token_uri": "https://oauth2.googleapis.com/token"}
+    creds = GoogleCredentials(None, tmp_path / "none.json", json.dumps(info))
+    loaded = creds._load()
+    assert loaded.service_account_email == "bot@p.iam.gserviceaccount.com"
+    assert "GOOGLE_SERVICE_ACCOUNT_JSON" in creds.describe()
+    with pytest.raises(GoogleAuthMissing, match="not valid JSON"):
+        GoogleCredentials(None, tmp_path / "none.json", "{oops")._load()

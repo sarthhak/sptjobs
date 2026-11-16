@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from pathlib import Path
 
@@ -26,13 +27,16 @@ class GoogleAuthMissing(RuntimeError):
 class GoogleCredentials:
     """Loads credentials once and refreshes them when needed. Thread-safe."""
 
-    def __init__(self, service_account_file: Path | None, token_file: Path):
+    def __init__(self, service_account_file: Path | None, token_file: Path, service_account_json: str | None = None):
+        self._sa_json = service_account_json
         self._sa_file = service_account_file
         self._token_file = token_file
         self._creds = None
         self._lock = threading.Lock()
 
     def describe(self) -> str:
+        if self._sa_json:
+            return "service account (GOOGLE_SERVICE_ACCOUNT_JSON)"
         if self._sa_file:
             return f"service account ({self._sa_file.name})"
         return f"OAuth user token ({self._token_file})"
@@ -46,6 +50,12 @@ class GoogleCredentials:
             return self._creds
 
     def _load(self):
+        if self._sa_json:
+            try:
+                info = json.loads(self._sa_json)
+            except json.JSONDecodeError as e:
+                raise GoogleAuthMissing(f"GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON: {e}") from e
+            return service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
         if self._sa_file:
             if not self._sa_file.exists():
                 raise GoogleAuthMissing(f"Service account file not found: {self._sa_file}")
@@ -53,7 +63,7 @@ class GoogleCredentials:
         if self._token_file.exists():
             return user_credentials.Credentials.from_authorized_user_file(str(self._token_file), SCOPES)
         raise GoogleAuthMissing(
-            "No Google credentials. Set GOOGLE_SERVICE_ACCOUNT_FILE, or run "
+            "No Google credentials. Set GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SERVICE_ACCOUNT_FILE, or run "
             "`python scripts/google_login.py` to create an OAuth token."
         )
 
