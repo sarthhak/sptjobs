@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import secrets
+import time
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -20,7 +21,10 @@ from .agent.loop import run_turn
 from .agent.tools import run_gtm_audit, strip_snapshot
 from .audit.apply import ApplyError, apply_changeset, publish_workspace, rollback
 from .audit.container import Container
-from .audit.describe import enrich_findings, inventory
+from .audit.expert import run_expert_review
+from .audit.report import build_gtm_report
+from .audit.rules import run_audit
+from .usage import budget_error, budget_status, month_start
 from .export import ga4_audit_xlsx, gtm_audit_xlsx
 from .ga4_audit import run_ga4_audit
 from .audit.fixes import build_changeset
@@ -153,7 +157,8 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
                 "google_signin_available": bool(settings.google_oauth_client_id and settings.google_oauth_client_secret),
                 "google_signed_in": settings.google_token_file.exists(),
                 "google_uses_service_account": bool(settings.google_service_account_json or settings.google_service_account_file),
-                "google_redirect_uri": _redirect_uri(request)}
+                "google_redirect_uri": _redirect_uri(request),
+                "usage": budget_status(ctx.store), "usage_by_source": ctx.store.spend_by_source(month_start())}
 
     # -- Connect Google account ------------------------------------------------------
     oauth_signer = URLSafeTimedSerializer(settings.session_secret, salt="google-oauth")
@@ -294,6 +299,27 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
         except Exception as e:  # noqa: BLE001
             raise HTTPException(502, f"GA4: {e}")
 
+    # -- Claude spend & budget ----------------------------------------------------------
+    @app.get("/api/usage")
+    async def usage():
+        from .usage import month_start
+        return {**budget_status(ctx.store), "by_source_this_month": ctx.store.spend_by_source(month_start())}
+
+    @app.post("/api/usage/limit")
+    async def set_limit(request: Request):
+        value = (await request.json()).get("limit_usd")
+        if value in (None, ""):
+            ctx.store.set_setting("monthly_budget_usd", None)
+        else:
+            try:
+                limit = float(value)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Limit must be a number of US dollars")
+            if limit < 0:
+                raise HTTPException(400, "Limit can't be negative")
+            ctx.store.set_setting("monthly_budget_usd", str(limit))
+        return budget_status(ctx.store)
+
     # -- audits ----------------------------------------------------------------------
     @app.get("/api/audits")
     async def audits():
@@ -309,19 +335,63 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
             raise HTTPException(502, f"Audit failed: {e}")
         return {"id": audit_id, **strip_snapshot(result)}
 
-    def _full_audit(aid: int) -> dict:
+    def _current(aid: int) -> tuple[dict, Container, dict]:
+        """Stored audit, its container, and findings recomputed with the current rules (kept in sync in the DB)."""
         a = ctx.store.get_audit(aid)
         if not a:
             raise HTTPException(404)
         c = Container(a["result"]["version_snapshot"])
-        out = {**{k: v for k, v in a.items() if k != "result"}, **strip_snapshot(a["result"])}
-        out["findings"] = enrich_findings(c, out["findings"])
-        out["inventory"] = inventory(c, out["findings"])
-        return out
+        fresh = run_audit(c, settings.tag_naming_pattern)
+        result = {**a["result"], **fresh}
+        if fresh["findings"] != a["result"].get("findings"):
+            ctx.store.update_audit(aid, result)
+        return a, c, result
+
+    def _full_audit(aid: int) -> dict:
+        a, c, result = _current(aid)
+        report = build_gtm_report(c, result, result.get("expert"))
+        return {"id": aid, "created": a["created"], "container_path": a["container_path"], "container": result["container"],
+                "public_id": result.get("public_id"), "version_id": result.get("version_id"), "score": result["score"],
+                "totals": result["totals"], **report}
 
     @app.get("/api/audits/{aid}")
     async def audit(aid: int):
         return _full_audit(aid)
+
+    expert_jobs: dict[int, dict] = {}
+    background: set = set()
+
+    async def _expert_job(aid: int):
+        job = expert_jobs[aid]
+        try:
+            _, c, result = _current(aid)
+            result["expert"] = await run_expert_review(ctx, c, result)
+            ctx.store.update_audit(aid, result)
+            job.update(status="done")
+        except Exception as e:  # noqa: BLE001
+            log.exception("expert review failed")
+            job.update(status="error", error=f"Expert review failed: {e}")
+
+    @app.post("/api/audits/{aid}/expert-review")
+    async def expert_review(aid: int):
+        """Starts the review in the background (it can take a few minutes); poll the GET endpoint."""
+        if ctx.anthropic is None:
+            raise HTTPException(400, "Set ANTHROPIC_API_KEY to use the expert review.")
+        over = budget_error(ctx.store)
+        if over:
+            raise HTTPException(402, over)
+        _current(aid)  # 404 if missing
+        if expert_jobs.get(aid, {}).get("status") == "running":
+            return expert_jobs[aid]
+        expert_jobs[aid] = {"status": "running", "started": time.time()}
+        task = asyncio.create_task(_expert_job(aid))
+        background.add(task)
+        task.add_done_callback(background.discard)
+        return expert_jobs[aid]
+
+    @app.get("/api/audits/{aid}/expert-review")
+    async def expert_review_status(aid: int):
+        return expert_jobs.get(aid, {"status": "none"})
 
     @app.get("/api/audits/{aid}/export.xlsx")
     async def audit_export(aid: int):
@@ -368,7 +438,8 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
             raise HTTPException(404)
         body = await request.json()
         ids = body.get("finding_ids") or []
-        ops, errors = build_changeset(Container(a["result"]["version_snapshot"]), a["result"]["findings"], ids, [])
+        _, c, result = _current(aid)
+        ops, errors = build_changeset(c, result["findings"], ids, [])
         if not ops:
             raise HTTPException(400, "; ".join(errors) or "No fixable findings selected")
         csid = ctx.store.create_changeset(container_path=a["container_path"], audit_id=aid, version_id=a["version_id"],

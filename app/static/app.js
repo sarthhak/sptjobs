@@ -21,8 +21,14 @@ function setNav(name) {
 async function loadStatus() {
   try {
     STATUS = await api("/api/status");
+    const u = STATUS.usage || {};
+    const pct = u.limit_usd ? Math.min(100, (100 * u.month_usd) / u.limit_usd) : 0;
     document.getElementById("status").innerHTML =
-      `Model: ${esc(STATUS.model)}<br>Google: ${esc(STATUS.google.split(":")[0])}<br>GTM writes: ${STATUS.writes_enabled ? "on" : "off"}`;
+      `<div class="spend"><div class="label">Claude spend this month</div>
+        <div class="spend-num">$${(u.month_usd || 0).toFixed(2)}${u.limit_usd != null ? ` <span class="muted">of $${u.limit_usd.toFixed(2)}</span>` : ""}</div>
+        ${u.limit_usd != null ? `<div class="bar"><div style="width:${pct}%" class="${pct >= 90 ? "hot" : ""}"></div></div>` : '<a href="#settings">Set a monthly limit</a>'}
+        <div class="muted">All time: $${(u.total_usd || 0).toFixed(2)}</div></div>
+      Model: ${esc(STATUS.model)}<br>Google: ${esc(STATUS.google.split(":")[0])}<br>GTM writes: ${STATUS.writes_enabled ? "on" : "off"}`;
   } catch (e) { /* shown on the Connection page */ }
 }
 
@@ -191,6 +197,7 @@ async function sendMessage(cid, text, thread) {
   } finally {
     status.remove();
     sendBtn.disabled = false;
+    loadStatus();
     scrollDown();
   }
 }
@@ -235,6 +242,7 @@ function wireTabs() {
   });
 }
 
+const linkify = (text) => esc(text).replace(/https:\/\/[^\s<]+[^\s<.,)]/g, (u) => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
 const list = (items) => (items && items.length ? items.map((x) => `<div>${esc(x)}</div>`).join("") : '<span class="muted">-</span>');
 
 function findingCard(f, i, extra = "") {
@@ -282,62 +290,142 @@ async function auditsPage(id) {
   };
 }
 
-function affectedTable(items) {
-  if (!items || !items.length) return "";
-  return `<div style="overflow-x:auto;margin-top:10px"><table class="compact"><thead><tr><th>Item</th><th>Name</th><th>Type</th><th>Status</th><th>Fires on</th><th>Details</th></tr></thead><tbody>
-    ${items.map((a) => `<tr><td>${esc(a.kind)}</td><td><b>${esc(a.name)}</b> <span class="muted">#${esc(a.id)}</span></td><td>${esc(a.type)}</td>
-      <td>${esc(a.status || "")}</td><td>${esc(a.triggers || "")}</td><td class="details">${esc(a.details || "")}</td></tr>`).join("")}</tbody></table></div>`;
+const HEALTH_CLASS = { Red: "sev-critical", Amber: "sev-high", Watch: "sev-medium", Green: "sev-low" };
+
+function gtmFindingCard(f) {
+  const multi = (f.affected || []).length > 1;
+  const items = (f.affected || []).map((a) => {
+    const fixable = f.fixable && f.finding_id && (f.item_fixable[a.id] ?? true) && multi;
+    return `<tr>${multi && f.fixable ? `<td>${fixable ? `<input type="checkbox" class="item-box" value="${esc(f.finding_id)}@${esc(a.id)}">` : ""}</td>` : ""}
+      <td>${esc(a.kind)}</td><td><b>${esc(a.name)}</b> <span class="muted">#${esc(a.id)}</span></td><td>${esc(a.type)}</td>
+      <td>${esc(a.status || "")}</td><td>${esc(a.triggers || "")}</td><td class="details">${esc((f.item_notes || {})[a.id] && multi ? f.item_notes[a.id] : a.details || "")}</td></tr>`;
+  }).join("");
+  const table = items ? `<div style="overflow-x:auto;margin-top:10px"><table class="compact"><thead><tr>${multi && f.fixable ? "<th></th>" : ""}
+      <th>Item</th><th>Name</th><th>Type</th><th>Status</th><th>Fires on</th><th>Details</th></tr></thead><tbody>${items}</tbody></table></div>`
+    : (f.evidence ? `<div style="margin-top:10px"><div class="label">Evidence</div><div class="details">${esc(f.evidence)}</div></div>` : "");
+  return `<div class="finding" data-sev="${f.severity}">
+    <div class="finding-head">
+      ${f.fixable && f.finding_id ? `<input type="checkbox" class="finding-box" value="${esc(f.finding_id)}" title="Include the automatic fix for all items">` : ""}
+      <b>${esc(f.ref)}</b> ${sevPill(f.severity)} <b>${esc(f.title)}</b>
+      <span class="tag-chip">${esc(f.area)}</span><span class="tag-chip">Effort ${esc(f.effort)}</span><span class="tag-chip">${esc(f.priority)}</span>
+      <span class="tag-chip">${esc(f.phase)}</span>${f.source !== "Rules" ? `<span class="tag-chip">${esc(f.source)}</span>` : ""}
+      ${f.fixable ? '<span class="tag-chip ok">Auto-fix available</span>' : ""}
+    </div>
+    <div class="finding-grid four">
+      <div><div class="label">What's happening</div>${esc(f.detail)}</div>
+      <div><div class="label">Why it matters</div>${esc(f.impact)}</div>
+      <div><div class="label">How to fix</div>${esc(f.fix)}<div class="muted" style="margin-top:4px">Owner: ${esc(f.owner)}</div></div>
+      <div><div class="label">How to validate</div>${esc(f.validate)}</div>
+    </div>${table}</div>`;
 }
 
 async function auditDetail(id) {
   const a = await api(`/api/audits/${id}`);
   const inv = a.inventory;
-  const issueCell = (xs) => xs.length ? `<span class="pill sev-high" title="${esc(xs.join("\n"))}">${xs.length}</span>` : "";
-  view.innerHTML = `<div class="page">
+  const recClass = (r) => (r.startsWith("Fix") ? "sev-high" : r.startsWith("Delete") ? "sev-info" : "sev-low");
+  const rec = (r) => `<span class="pill ${recClass(r)}">${esc(r)}</span>`;
+  const tabsList = [["overview", "Overview"], ["findings", `Findings (${a.findings.length})`], ["plan", "Action plan"], ["consent", "Consent matrix"]];
+  if (a.event_model.length) tabsList.push(["events", "Event model"]);
+  tabsList.push(["tags", `Tags (${inv.tags.length})`], ["triggers", `Triggers (${inv.triggers.length})`], ["variables", `Variables (${inv.variables.length})`]);
+  view.innerHTML = `<div class="page wide">
     <p><a href="#audits">&larr; GTM audits</a></p>
     <div class="row" style="justify-content:space-between">
       <h1>${esc(a.container)} <span class="muted">(${esc(a.public_id)}, version ${esc(a.version_id)})</span></h1>
-      <a href="/api/audits/${id}/export.xlsx"><button>Download Excel</button></a>
+      <span class="row"><button id="expert" ${STATUS.claude_configured ? "" : "disabled"}>${a.has_expert_review ? "Redo" : "Add"} expert review</button>
+      <a href="/api/audits/${id}/export.xlsx"><button class="primary">Download Excel</button></a></span>
     </div>
-    ${scoreCard(a.score, a.counts, `${a.totals.tags} tags, ${a.totals.triggers} triggers, ${a.totals.variables} variables. Run ${when(a.created)}.`)}
-    ${tabs([["findings", `Findings (${a.findings.length})`], ["tags", `Tags (${inv.tags.length})`], ["triggers", `Triggers (${inv.triggers.length})`], ["variables", `Variables (${inv.variables.length})`]])}
-    <div data-panel="findings">
-      <div class="row" style="justify-content:space-between">
-        ${filterBar("f")}
-        <span class="row"><button id="selectFixable">Select all auto-fixes</button><button class="primary" id="propose">Create change set from selected</button></span>
+    <p class="muted" id="expertStatus">${a.has_expert_review ? "Includes an expert review by Claude (executive summary, priorities, extra findings, event model)." :
+      "Expert review: Claude adds an executive summary, priorities, extra findings and a proposed event model. Uses API credits (typically well under $1 per audit)."}</p>
+    ${tabs(tabsList)}
+    <div data-panel="overview">
+      <div class="grid">
+        <div class="card"><b>Container at a glance</b><table class="compact">${a.glance.map(([k, v]) => `<tr><th style="width:44%">${esc(k)}</th><td>${esc(v)}</td></tr>`).join("")}</table></div>
+        <div class="card"><b>Findings scorecard</b> <span class="pill ${HEALTH_CLASS[a.health]}">${esc(a.health)}</span>
+          <table class="compact"><thead><tr><th>Area</th><th>Critical</th><th>High</th><th>Medium</th><th>Low</th><th>Total</th><th>Health</th></tr></thead><tbody>
+          ${a.scorecard.map((r) => `<tr${r.area === "Total" ? ' style="font-weight:600"' : ""}><td>${esc(r.area)}</td><td class="num">${r.critical}</td><td class="num">${r.high}</td>
+            <td class="num">${r.medium}</td><td class="num">${r.low}</td><td class="num">${r.total}</td><td><span class="pill ${HEALTH_CLASS[r.health]}">${r.health}</span></td></tr>`).join("")}
+          </tbody></table><p class="muted">Score ${a.score}/100</p></div>
       </div>
-      ${a.findings.map((f, i) => findingCard(f, i + 1, affectedTable(f.affected))).join("") || '<p class="muted">No findings. Nice.</p>'}
+      ${a.executive_summary ? `<div class="card"><b>Executive summary</b><p>${esc(a.executive_summary)}</p></div>` : ""}
+      <div class="card"><b>Top priorities</b><ol>${a.top_priorities.map((t) => `<li style="margin:6px 0"><b>${esc(t.title)}</b> - ${esc(t.detail)}
+        ${(t.finding_refs || []).length ? `<span class="muted">(${esc(t.finding_refs.join(", "))})</span>` : ""}</li>`).join("")}</ol></div>
     </div>
+    <div data-panel="findings" style="display:none">
+      <div class="row" style="justify-content:space-between">${filterBar("f")}
+        <span class="row"><button id="selectFixable">Select all auto-fixes</button><button class="primary" id="propose">Create change set from selected</button></span></div>
+      ${a.findings.map(gtmFindingCard).join("") || '<p class="muted">No findings.</p>'}
+    </div>
+    <div data-panel="plan" style="display:none"><div class="card" style="overflow-x:auto"><table class="compact">
+      <thead><tr><th>Phase</th><th>Workstream</th><th>Actions</th><th>Owner</th><th>Done when</th></tr></thead><tbody>
+      ${a.action_plan.map((r) => `<tr><td>${esc(r.phase)}</td><td>${esc(r.workstream)}</td><td>${r.actions.map((x) => `<div>${esc(x)}</div>`).join("")}</td>
+        <td>${esc(r.owner)}</td><td class="details">${esc(r.done_when)}</td></tr>`).join("")}</tbody></table></div></div>
+    <div data-panel="consent" style="display:none"><div class="card" style="overflow-x:auto">
+      <p class="muted" style="margin-top:0">Live tags x firing triggers. An exception (blocking trigger) only applies when it listens to the same GTM event as the firing trigger.</p>
+      <table class="compact"><thead><tr><th>Tag</th><th>Vendor / type</th><th>Firing trigger</th><th>GTM event</th><th>Exception events</th><th>Exception status</th><th>Trigger consent-gated?</th><th>Risk</th></tr></thead><tbody>
+      ${a.consent_matrix.map((r) => `<tr><td><b>${esc(r.tag)}</b> <span class="muted">#${esc(r.tag_id)}</span></td><td>${esc(r.vendor || r.type)}</td><td>${esc(r.firing_trigger)}</td>
+        <td>${esc(r.firing_event)}</td><td>${esc(r.exception_events)}</td><td>${esc(r.exception_status)}</td><td>${r.self_gated ? "Yes" : "No"}</td>
+        <td><span class="pill ${r.risk === "No consent check" ? "sev-critical" : r.risk === "OK" ? "sev-low" : "sev-medium"}">${esc(r.risk)}</span></td></tr>`).join("")}
+      </tbody></table></div></div>
+    ${a.event_model.length ? `<div data-panel="events" style="display:none"><div class="card" style="overflow-x:auto"><table class="compact">
+      <thead><tr><th>Current live event(s)</th><th>Proposed event</th><th>Parameters</th><th>Key event?</th><th>Notes</th></tr></thead><tbody>
+      ${a.event_model.map((e) => `<tr><td class="details">${esc(e.current_events)}</td><td><b>${esc(e.proposed_event)}</b></td><td class="details">${esc(e.parameters)}</td>
+        <td>${esc(e.key_event)}</td><td class="details">${esc(e.notes)}</td></tr>`).join("")}</tbody></table>
+      ${a.custom_dimensions.length ? `<p><b>Custom dimensions to register:</b> ${esc(a.custom_dimensions.join(", "))}</p>` : ""}</div></div>` : ""}
     <div data-panel="tags" style="display:none"><div class="card" style="overflow-x:auto"><table class="compact">
-      <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Fires on</th><th>Blocked by</th><th>Consent</th><th>Details</th><th>Issues</th></tr></thead><tbody>
+      <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Fires on</th><th>Exceptions</th><th>Measurement ID / event</th><th>Settings</th><th>Consent</th><th>Recommendation</th></tr></thead><tbody>
       ${inv.tags.map((t) => `<tr><td><b>${esc(t.name)}</b><div class="muted">#${esc(t.id)}${t.folder ? " · " + esc(t.folder) : ""}</div></td><td>${esc(t.type)}</td><td>${esc(t.status)}</td>
-        <td>${list(t.fires_on)}</td><td>${list(t.blocked_by)}</td><td>${esc(t.consent)}</td><td class="details">${esc(t.details)}</td><td>${issueCell(t.issues)}</td></tr>`).join("")}
+        <td>${list(t.fires_on)}</td><td>${list(t.blocked_by)}</td><td>${esc(t.measurement_id)}${t.event_name ? `<div>${esc(t.event_name)}</div>` : ""}</td>
+        <td class="details">${esc(t.details)}</td><td>${esc(t.consent)}</td><td>${rec(t.recommendation)}<div class="muted">${esc(t.findings)}</div></td></tr>`).join("")}
     </tbody></table></div></div>
     <div data-panel="triggers" style="display:none"><div class="card" style="overflow-x:auto"><table class="compact">
-      <thead><tr><th>Name</th><th>Type</th><th>Conditions</th><th>Used by tags</th><th>Issues</th></tr></thead><tbody>
-      ${inv.triggers.map((t) => `<tr><td><b>${esc(t.name)}</b><div class="muted">#${esc(t.id)}${t.folder ? " · " + esc(t.folder) : ""}</div></td><td>${esc(t.type)}</td>
-        <td class="details">${esc(t.conditions)}</td><td>${list(t.used_by)}</td><td>${issueCell(t.issues)}</td></tr>`).join("")}
-    </tbody></table>
-    <p class="muted">Built-in triggers in use: ${esc(inv.built_in_triggers_used.join(", ") || "none")}</p></div></div>
+      <thead><tr><th>Name</th><th>Type</th><th>GTM event</th><th>Conditions</th><th>Used by tags</th><th>Recommendation</th></tr></thead><tbody>
+      ${inv.triggers.map((t) => `<tr><td><b>${esc(t.name)}</b><div class="muted">#${esc(t.id)}${t.folder ? " · " + esc(t.folder) : ""}</div></td><td>${esc(t.type)}</td><td>${esc(t.gtm_event)}</td>
+        <td class="details">${esc(t.conditions)}</td><td>${list(t.used_by)}</td><td>${rec(t.recommendation)}<div class="muted">${esc(t.findings)}</div></td></tr>`).join("")}
+    </tbody></table></div></div>
     <div data-panel="variables" style="display:none"><div class="card" style="overflow-x:auto"><table class="compact">
-      <thead><tr><th>Name</th><th>Type</th><th>Details</th><th>Used by</th><th>Issues</th></tr></thead><tbody>
-      ${inv.variables.map((v) => `<tr><td><b>${esc(v.name)}</b><div class="muted">#${esc(v.id)}${v.folder ? " · " + esc(v.folder) : ""}</div></td><td>${esc(v.type)}</td>
-        <td class="details">${esc(v.details)}</td><td>${list(v.used_by)}</td><td>${issueCell(v.issues)}</td></tr>`).join("")}
-    </tbody></table>
-    <p class="muted">Enabled built-in variables: ${esc(inv.built_in_variables.join(", ") || "none")}</p></div></div>
+      <thead><tr><th>Name</th><th>Type</th><th>Details</th><th>Used by</th><th>Recommendation</th></tr></thead><tbody>
+      ${inv.variables.map((v) => `<tr><td><b>${esc(v.name)}</b><div class="muted">#${esc(v.id)}</div></td><td>${esc(v.type)}</td>
+        <td class="details">${esc(v.details)}</td><td>${list(v.used_by)}</td><td>${rec(v.recommendation)}<div class="muted">${esc(v.findings)}</div></td></tr>`).join("")}
+    </tbody></table><p class="muted">Enabled built-in variables: ${esc(inv.built_in_variables.join(", ") || "none")}</p></div></div>
   </div>`;
   wireTabs();
   wireFilter("f", ".finding");
-  const boxes = () => [...view.querySelectorAll(".finding input[type=checkbox]")];
-  document.getElementById("selectFixable").onclick = () => boxes().forEach((b) => b.checked = true);
+  const findingBoxes = () => [...view.querySelectorAll(".finding-box")];
+  const itemBoxes = () => [...view.querySelectorAll(".item-box")];
+  view.querySelectorAll(".finding-box").forEach((b) => b.addEventListener("change", () => {
+    b.closest(".finding").querySelectorAll(".item-box").forEach((x) => x.checked = b.checked);
+  }));
+  document.getElementById("selectFixable").onclick = () => [...findingBoxes(), ...itemBoxes()].forEach((b) => b.checked = true);
   document.getElementById("propose").onclick = async () => {
-    const ids = boxes().filter((b) => b.checked).map((b) => b.value);
-    if (!ids.length) return alert("Tick at least one finding that has an automatic fix.");
+    const ids = [];
+    view.querySelectorAll(".finding").forEach((card) => {
+      const all = card.querySelector(".finding-box");
+      const items = [...card.querySelectorAll(".item-box")];
+      if (items.length) {
+        const picked = items.filter((x) => x.checked);
+        if (picked.length === items.length && all?.checked) ids.push(all.value);
+        else ids.push(...picked.map((x) => x.value));
+      } else if (all?.checked) ids.push(all.value);
+    });
+    if (!ids.length) return alert("Tick at least one finding (or item) that has an automatic fix.");
     try {
       const r = await post(`/api/audits/${id}/changeset`, { finding_ids: ids });
       if (r.errors?.length) alert("Some fixes were skipped:\n" + r.errors.join("\n"));
       location.hash = `changes/${r.id}`;
     } catch (e) { alert(e.message); }
+  };
+  document.getElementById("expert").onclick = async (ev) => {
+    ev.target.disabled = true;
+    document.getElementById("expertStatus").textContent = "Claude is reviewing the container... this takes 1-3 minutes.";
+    try {
+      await post(`/api/audits/${id}/expert-review`);
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 5000));
+        const job = await api(`/api/audits/${id}/expert-review`);
+        if (job.status === "done") { await loadStatus(); return auditDetail(id); }
+        if (job.status === "error") throw new Error(job.error);
+      }
+    } catch (e) { document.getElementById("expertStatus").textContent = e.message; ev.target.disabled = false; }
   };
 }
 
@@ -357,7 +445,7 @@ async function ga4AuditsPage(id) {
     </div>
     <div class="card" style="padding:0">${audits.length ? audits.map((a) => `
       <div class="list-item" data-id="${a.id}"><span><b>#${a.id}</b> ${esc(a.property_name)} <span class="muted">${esc(a.property)}</span></span>
-      <span>${a.score}/100 <span class="muted">${when(a.created)}</span></span></div>`).join("") : '<p class="muted" style="padding:12px">No GA4 audits yet.</p>'}</div>
+      <span>${a.score ?? "incomplete"}${a.score != null ? "/100" : ""} <span class="muted">${when(a.created)}</span></span></div>`).join("") : '<p class="muted" style="padding:12px">No GA4 audits yet.</p>'}</div>
   </div>`;
   view.querySelectorAll(".list-item").forEach((el) => el.onclick = () => location.hash = `ga4audits/${el.dataset.id}`);
   const sel = document.getElementById("property");
@@ -383,8 +471,9 @@ async function ga4AuditDetail(id) {
       <h1>${esc(a.property_name)} <span class="muted">(${esc(a.property)})</span></h1>
       <a href="/api/ga4-audits/${id}/export.xlsx"><button>Download Excel</button></a>
     </div>
-    ${scoreCard(a.score, a.counts, `${esc(a.period)}: ${num(ov.sessions)} sessions, ${num(ov.totalUsers)} users, ${typeof ov.engagementRate === "number" ? (ov.engagementRate * 100).toFixed(1) + "%" : "-"} engagement, ${num(ov.keyEvents)} key events. Run ${when(a.created)}.`)}
-    ${Object.keys(a.errors || {}).length ? `<div class="banner">Some checks could not run: ${esc(Object.entries(a.errors).map(([k, v]) => `${k} (${v})`).join("; "))}</div>` : ""}
+    ${a.incomplete ? `<div class="banner"><b>Audit incomplete - the data checks could not run.</b> Only property settings were checked, so no score is given.</div>` : ""}
+    ${scoreCard(a.score ?? "-", a.counts, `${esc(a.period)}: ${num(ov.sessions)} sessions, ${num(ov.totalUsers)} users, ${typeof ov.engagementRate === "number" ? (ov.engagementRate * 100).toFixed(1) + "%" : "-"} engagement, ${num(ov.keyEvents)} key events. Run ${when(a.created)}.`)}
+    ${(a.problems || []).length ? `<div class="banner"><b>Fix this to complete the audit:</b><ul>${a.problems.map((m) => `<li>${linkify(m)}</li>`).join("")}</ul></div>` : ""}
     ${tabs([["findings", `Findings (${a.findings.length})`], ["settings", "Property settings"], ["data", "Traffic & events"]])}
     <div data-panel="findings">${filterBar("g")}
       ${a.findings.map((f, i) => findingCard(f, i + 1, evidence(f))).join("") || '<p class="muted">No findings. Nice.</p>'}</div>
@@ -545,7 +634,21 @@ async function settingsPage(result) {
       <tr><th>Post-publish site check</th><td>${s.site_url ? esc(s.site_url) : "Off (set SITE_URL)"}</td></tr>
       <tr><th>Password</th><td>${s.password_protected ? "On" : "Off: only reachable from this machine"}</td></tr>
     </table></div>
+    <div class="card"><b>Claude spend &amp; monthly limit</b>
+      <p class="muted">Estimated from token usage at list prices; your Anthropic Console bill is the authoritative figure. When the limit is reached, chat and
+      expert reviews stop until next month or until you raise it. For a hard cap, also set a spend limit in the Anthropic Console (Settings &gt; Limits).</p>
+      <div class="row"><label for="limit">Monthly limit (USD)</label><input id="limit" type="number" min="0" step="1" style="width:140px"
+        value="${s.usage?.limit_usd ?? ""}" placeholder="No limit"><button class="primary" id="saveLimit" type="button">Save</button><span class="muted" id="limitMsg"></span></div>
+      <table class="compact" style="margin-top:10px"><thead><tr><th>This month</th><th>Calls</th><th>Input tokens</th><th>Output tokens</th><th>Cost</th></tr></thead><tbody>
+      ${(s.usage_by_source || []).map((r) => `<tr><td>${esc(r.source === "chat" ? "Ask (chat)" : r.source === "expert_review" ? "Expert reviews" : r.source)}</td><td class="num">${fmt.format(r.calls)}</td>
+        <td class="num">${fmt.format(r.input_tokens || 0)}</td><td class="num">${fmt.format(r.output_tokens || 0)}</td><td class="num">$${(r.cost_usd || 0).toFixed(2)}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">No usage yet this month.</td></tr>'}
+      </tbody></table></div>
     <form method="post" action="/logout"><button>Log out</button></form></div>`;
+  document.getElementById("saveLimit").onclick = async () => {
+    const v = document.getElementById("limit").value;
+    try { await post("/api/usage/limit", { limit_usd: v === "" ? null : Number(v) }); document.getElementById("limitMsg").textContent = "Saved."; loadStatus(); }
+    catch (e) { document.getElementById("limitMsg").textContent = e.message; }
+  };
   const dc = document.getElementById("disconnect");
   if (dc) dc.onclick = async () => {
     if (!confirm("Disconnect your Google account from this app?")) return;

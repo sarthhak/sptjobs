@@ -17,6 +17,13 @@ installed on your office laptop.
 - Each finding explains what's happening, why it matters, how to fix it and who owns it, with evidence. Download as Excel.
 
 **GTM audits and fixes**
+- Report in a consultant structure: container at a glance, scorecard by area (Consent & privacy, GA4 data quality,
+  Measurement coverage, Event taxonomy, Tag governance, Martech stack), top priorities, a findings log (F-01...) with
+  evidence, impact, effort, priority, phase, fix, how to validate and owner, a phased action plan, a consent matrix
+  (live tags x firing triggers, including exceptions that never apply), and tag/trigger/variable inventories with a
+  Keep/Fix/Delete recommendation each. Same structure in the Excel download.
+- Optional **Expert review** (uses Claude credits): executive summary, top 5 priorities, extra findings that need
+  judgment (e.g. no lead tracking, duplicate tracking of one action, vendor overlap) and a proposed GA4 event model.
 - Audit the live container: 20+ checks covering broken references, duplicate tags, invalid GA4 event and parameter
   names, missing measurement IDs, ecommerce data, Universal Analytics leftovers, risky custom HTML, consent,
   conversion linker, catch-all triggers, unused items, naming and folders. Each audit gets a health score.
@@ -28,6 +35,12 @@ installed on your office laptop.
   one-click rollback.
 - Check a live page in a headless browser: which containers load, which GA4 events fire, what's in the dataLayer.
   GA4 hits from these checks are intercepted, so they never reach your reports.
+
+## Claude spend
+
+The sidebar shows estimated Claude spend this month. On the Connection page you can set a monthly limit in USD;
+once it's reached, chat and expert reviews stop until next month or until you raise it. Estimates use list prices;
+your Anthropic Console bill is authoritative, and you can also set a hard limit there.
 
 ## How changes stay safe
 

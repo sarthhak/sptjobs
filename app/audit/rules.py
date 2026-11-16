@@ -7,6 +7,7 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 
 from .container import ALL_PAGES, Container, map_value, param, signature, var_refs
+from .meta import meta
 
 SEVERITY_WEIGHT = {"critical": 15, "high": 8, "medium": 3, "low": 1, "info": 0}
 SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
@@ -42,6 +43,8 @@ class Finding:
     entity_ids: list[str] = field(default_factory=list)
     entity_names: list[str] = field(default_factory=list)
     fixable: bool = False
+    item_notes: dict = field(default_factory=dict)      # entity id -> what's wrong with that item
+    item_fixable: dict = field(default_factory=dict)    # entity id -> has an automatic fix
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -75,8 +78,10 @@ def _event_params(tag: dict) -> list[str]:
 def _ga4_name_problem(name: str) -> str | None:
     if "{{" in name:
         return None  # dynamic - checked at runtime only
+    if len(name) > 40:
+        return "is longer than 40 characters"
     if not GA4_NAME.match(name):
-        return "must start with a letter, use only letters, numbers and underscores, and be at most 40 characters"
+        return "contains spaces or characters other than letters, numbers and underscores"
     if name.lower().startswith(RESERVED_PREFIXES):
         return "uses a reserved prefix (google_, ga_, firebase_, _)"
     if name in RESERVED_EVENTS:
@@ -102,6 +107,8 @@ def sanitize_event_name(name: str) -> str | None:
 def rule_broken_trigger_refs(c: Container) -> list[Finding]:
     out = []
     for t in c.tags:
+        if t.get("paused"):
+            continue
         missing = [i for i in (t.get("firingTriggerId", []) or []) + (t.get("blockingTriggerId", []) or [])
                    if i not in c.trigger_by_id and c.trigger_name(i).startswith("missing")]
         if missing:
@@ -116,6 +123,8 @@ def rule_broken_variable_refs(c: Container) -> list[Finding]:
     out = []
     for kind, items in (("tag", c.tags), ("trigger", c.triggers), ("variable", c.variables)):
         for e in items:
+            if e.get("paused"):
+                continue
             missing = sorted(r for r in var_refs(e) if r not in known and r != "_event")
             if missing:
                 out.append(_f("BROKEN_VARIABLE_REF", "high", f"{kind.title()} '{e['name']}' uses undefined variables",
@@ -210,7 +219,7 @@ def rule_duplicate_google_tags(c: Container) -> list[Finding]:
 def rule_ga4_event_names(c: Container) -> list[Finding]:
     out = []
     for t in c.tags:
-        if t["type"] != "gaawe":
+        if t["type"] != "gaawe" or t.get("paused"):
             continue
         name = _event_name(t)
         if not name:
@@ -220,8 +229,9 @@ def rule_ga4_event_names(c: Container) -> list[Finding]:
         problem = _ga4_name_problem(name)
         if problem:
             fix = sanitize_event_name(name)
-            out.append(_f("GA4_EVENT_NAME_INVALID", "high", f"Event name '{name}' {problem}",
-                          f"Tag '{t['name']}' sends '{name}'. GA4 rejects or ignores it.",
+            severe = problem.startswith(("is longer", "uses a reserved", "is a name reserved"))
+            out.append(_f("GA4_EVENT_NAME_INVALID", "high" if severe else "medium", f"Event name '{name}' {problem}",
+                          f"'{name}' {problem}.",
                           f"Rename the event{f' to {fix!r}' if fix else ''}. Renaming starts a new series in reports.",
                           "tag", [t], fixable=bool(fix)))
         elif "{{" not in name and name != name.lower():
@@ -234,7 +244,7 @@ def rule_ga4_event_names(c: Container) -> list[Finding]:
 def rule_ga4_event_params(c: Container) -> list[Finding]:
     out = []
     for t in c.tags:
-        if t["type"] != "gaawe":
+        if t["type"] != "gaawe" or t.get("paused"):
             continue
         params = _event_params(t)
         bad = [p for p in params if "{{" not in p and _ga4_name_problem(p)]
@@ -298,7 +308,7 @@ def rule_legacy_tags(c: Container) -> list[Finding]:
 def rule_custom_html(c: Container) -> list[Finding]:
     out = []
     for t in c.tags:
-        if t["type"] != "html":
+        if t["type"] != "html" or t.get("paused"):
             continue
         html = param(t, "html") or ""
         issues = []
@@ -317,20 +327,6 @@ def rule_custom_html(c: Container) -> list[Finding]:
             out.append(_f("CUSTOM_HTML_ALL_PAGES", "low", f"Custom HTML tag '{t['name']}' runs on every page",
                           "Custom HTML on every page adds script execution to all page loads and bypasses template permissions.",
                           "Use a gallery template if one exists, or narrow the trigger.", "tag", [t]))
-    return out
-
-
-def rule_consent(c: Container) -> list[Finding]:
-    out = []
-    for t in c.tags:
-        if t["type"] in GOOGLE_TAG_TYPES or t.get("paused"):
-            continue  # Google tags have built-in consent checks
-        status = (t.get("consentSettings") or {}).get("consentStatus", "notSet")
-        if status == "notSet":
-            out.append(_f("CONSENT_NOT_SET", "medium", f"Tag '{t['name']}' has no consent requirement",
-                          "This non-Google tag will fire regardless of the visitor's consent choice.",
-                          "If it sets cookies or sends data to a third party, require ad_storage / analytics_storage consent "
-                          "(Advanced Settings > Consent Settings).", "tag", [t]))
     return out
 
 
@@ -377,7 +373,7 @@ def rule_catch_all_custom_event(c: Container) -> list[Finding]:
 def rule_ecommerce_data(c: Container) -> list[Finding]:
     out = []
     for t in c.tags:
-        if t["type"] != "gaawe":
+        if t["type"] != "gaawe" or t.get("paused"):
             continue
         name = _event_name(t)
         if name in ECOMMERCE_EVENTS:
@@ -416,25 +412,101 @@ def rule_folders(c: Container) -> list[Finding]:
 RULES = [
     rule_ga4_missing_measurement_id, rule_broken_trigger_refs, rule_broken_variable_refs, rule_duplicate_tags,
     rule_duplicate_google_tags, rule_ga4_event_names, rule_ga4_event_params, rule_ecommerce_data, rule_legacy_tags,
-    rule_tag_without_trigger, rule_custom_html, rule_consent, rule_conversion_linker, rule_catch_all_custom_event,
+    rule_tag_without_trigger, rule_custom_html, rule_conversion_linker, rule_catch_all_custom_event,
     rule_duplicate_triggers, rule_hardcoded_measurement_id, rule_paused_tags, rule_unused_triggers,
     rule_unused_variables, rule_folders,
 ]
 
 
+# Rules whose per-item findings are merged into one finding per rule.
+CONSOLIDATE = {
+    "BROKEN_TRIGGER_REF": "{n} tags reference triggers that don't exist",
+    "BROKEN_VARIABLE_REF": "{n} items use variables that don't exist",
+    "TAG_NO_TRIGGER": "{n} live tags have no firing trigger",
+    "PAUSED_TAG": "{n} tags are paused",
+    "UNUSED_TRIGGER": "{n} triggers are not used by any tag",
+    "UNUSED_VARIABLE": "{n} variables are not referenced anywhere",
+    "GA4_EVENT_NO_NAME": "{n} GA4 event tags have no event name",
+    "GA4_EVENT_NAME_INVALID": "{n} live GA4 event tags use invalid event names",
+    "GA4_EVENT_NAME_STYLE": "{n} live GA4 event names aren't lowercase snake_case",
+    "GA4_TOO_MANY_PARAMS": "{n} GA4 event tags send more than 25 parameters",
+    "GA4_PARAM_NAME_INVALID": "{n} GA4 event tags send invalid parameter names",
+    "GA4_NO_MEASUREMENT_ID": "{n} GA4 event tags have no measurement ID",
+    "ECOMMERCE_NO_ITEMS": "{n} ecommerce event tags send no ecommerce data",
+    "LEGACY_UA_TAG": "{n} Universal Analytics tags are still active",
+    "LEGACY_GA4_CONFIG": "{n} tags use the old GA4 Configuration type",
+    "CUSTOM_HTML_RISK": "{n} Custom HTML tags contain risky code",
+    "CUSTOM_HTML_ALL_PAGES": "{n} Custom HTML tags run on every page",
+    "CATCH_ALL_TRIGGER": "{n} triggers fire on every dataLayer event",
+    "CONSENT_NOT_ENFORCED": "{n} third-party tags fire without a consent check",
+    "EXCEPTION_EVENT_MISMATCH": "{n} tags have exceptions that never apply",
+    "DYNAMIC_PARAM_NAMES": "{n} GA4 tags use variables as parameter names",
+    "DEBUG_MODE_SET": "{n} GA4 tags set debug_mode in production",
+    "ANONYMIZE_IP": "{n} GA4 tags still set anonymize_ip",
+    "GOOGLE_TAG_SETUP_ONLY": "{n} Google tags only load as setup tags",
+    "LOOKUP_NO_DEFAULT": "{n} lookup/regex tables have no default value",
+    "PAGE_RELOAD": "{n} tags reload the page",
+    "SHORT_POLLING": "{n} tags poll in a tight loop",
+    "DATALAYER_TYPO": "{n} tags push to a misspelt data layer",
+    "COOKIE_WIPE": "{n} tags delete cookies in bulk",
+    "CMP_VIA_GTM": "{n} tags load the consent banner through GTM",
+    "REGEX_MATCHES_ALL": "{n} triggers have a regex that matches everything",
+    "CLICK_VARS_ON_PAGE_LOAD": "{n} page-load triggers test click/form variables",
+}
+
+
+def consolidate(findings: list[Finding]) -> list[Finding]:
+    groups: dict[str, list[Finding]] = {}
+    out: list[Finding] = []
+    for f in findings:
+        if f.rule in CONSOLIDATE:
+            groups.setdefault(f.rule, []).append(f)
+        else:
+            out.append(f)
+    for rule, items in groups.items():
+        sev = min((i.severity for i in items), key=SEVERITY_ORDER.index)
+        m = meta(rule)
+        merged = Finding(
+            id=rule, rule=rule, severity=sev,
+            title=items[0].title if len(items) == 1 else CONSOLIDATE[rule].format(n=len(items)),
+            detail=m["what"] or items[0].detail,
+            recommendation=items[0].recommendation if len(items) == 1 else _generic_fix(rule, items),
+            entity_kind=items[0].entity_kind,
+            entity_ids=[i for f in items for i in f.entity_ids],
+            entity_names=[n for f in items for n in f.entity_names],
+            fixable=any(f.fixable for f in items),
+        )
+        merged.item_notes = {eid: f"{f.title}. {f.detail}" for f in items for eid in f.entity_ids}
+        merged.item_fixable = {eid: f.fixable for f in items for eid in f.entity_ids}
+        out.append(merged)
+    return out
+
+
+def _generic_fix(rule: str, items: list[Finding]) -> str:
+    recs = {f.recommendation for f in items}
+    return recs.pop() if len(recs) == 1 else "See each affected item; " + items[0].recommendation
+
+
+def score(findings: list[Finding]) -> int:
+    penalty = sum(SEVERITY_WEIGHT[f.severity] for f in findings)
+    return round(100 * 60 / (60 + penalty))
+
+
 def run_audit(c: Container, naming_pattern: str = "") -> dict:
+    from .extra_rules import EXTRA_RULES  # noqa: PLC0415 - avoids a circular import
+
     findings: list[Finding] = []
-    for rule in RULES:
+    for rule in RULES + EXTRA_RULES:
         findings.extend(rule(c))
     findings.extend(rule_naming(c, naming_pattern))
-    findings.sort(key=lambda f: SEVERITY_ORDER.index(f.severity))
-    score = max(0, 100 - sum(SEVERITY_WEIGHT[f.severity] for f in findings))
+    findings = consolidate(findings)
+    findings.sort(key=lambda f: (SEVERITY_ORDER.index(f.severity), -len(f.entity_ids)))
     counts = {s: sum(1 for f in findings if f.severity == s) for s in SEVERITY_ORDER}
     return {
         "container": c.name,
         "public_id": c.container.get("publicId"),
         "version_id": c.version_id,
-        "score": score,
+        "score": score(findings),
         "counts": counts,
         "totals": {"tags": len(c.tags), "triggers": len(c.triggers), "variables": len(c.variables)},
         "findings": [f.to_dict() for f in findings],

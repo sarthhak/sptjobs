@@ -56,6 +56,13 @@ main { overflow: auto; }
 .finding { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
 .finding-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
 .finding-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; font-size: 14px; }
+.finding-grid.four { grid-template-columns: repeat(4, 1fr); }
+.page.wide { max-width: 1400px; }
+.spend { margin-bottom: 12px; }
+.spend-num { font-size: 18px; font-weight: 700; color: var(--text); }
+.bar { height: 6px; background: var(--border); border-radius: 3px; margin: 4px 0; overflow: hidden; }
+.bar div { height: 100%; background: var(--accent); }
+.bar div.hot { background: var(--crit); }
 .label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 2px; }
 .tag-chip { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--soft); color: var(--muted); }
 .tag-chip.ok { color: var(--ok); }
@@ -107,6 +114,6 @@ ul.evidence { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
   .thread-wrap { height: 100%; }
   .composer { padding: 10px 16px; }
   .page { padding: 16px; }
-  .grid, .diff, .finding-grid { grid-template-columns: 1fr; }
+  .grid, .diff, .finding-grid, .finding-grid.four { grid-template-columns: 1fr; }
   .msg.user { margin-left: 0; }
 }

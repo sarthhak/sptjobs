@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS changesets (id INTEGER PRIMARY KEY, container_path TE
     version_path TEXT, previous_version_path TEXT, created REAL, updated REAL);
 CREATE TABLE IF NOT EXISTS dashboards (id INTEGER PRIMARY KEY, name TEXT, description TEXT, property TEXT, widgets TEXT, created REAL);
 CREATE TABLE IF NOT EXISTS ga4_audits (id INTEGER PRIMARY KEY, property TEXT, property_name TEXT, score INTEGER, result TEXT, created REAL);
+CREATE TABLE IF NOT EXISTS usage (id INTEGER PRIMARY KEY, source TEXT, conversation_id INTEGER, model TEXT, input_tokens INTEGER,
+    output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER, cost_usd REAL, created REAL);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY, conversation_id INTEGER, title TEXT, markdown TEXT, created REAL);
 """
 
@@ -138,6 +141,35 @@ class Store:
 
     def list_ga4_audits(self) -> list[dict]:
         return self._list("SELECT id, property, property_name, score, created FROM ga4_audits ORDER BY id DESC")
+
+    def update_audit(self, aid: int, result: dict) -> None:
+        self._update("audits", aid, result=result, score=result.get("score"))
+
+    # -- usage & settings -------------------------------------------------------------
+    def record_usage(self, **values) -> int:
+        return self._insert("usage", **values)
+
+    def spend_since(self, ts: float) -> float:
+        with self._lock:
+            row = self._db.execute("SELECT COALESCE(SUM(cost_usd), 0) FROM usage WHERE created >= ?", [ts]).fetchone()
+        return float(row[0])
+
+    def spend_by_source(self, ts: float) -> list[dict]:
+        return self._list("SELECT source, COUNT(*) AS calls, SUM(input_tokens + cache_read_tokens + cache_write_tokens) AS input_tokens, "
+                          "SUM(output_tokens) AS output_tokens, SUM(cost_usd) AS cost_usd FROM usage WHERE created >= ? GROUP BY source", [ts])
+
+    def get_setting(self, key: str) -> str | None:
+        with self._lock:
+            row = self._db.execute("SELECT value FROM settings WHERE key = ?", [key]).fetchone()
+        return row[0] if row else None
+
+    def set_setting(self, key: str, value: str | None) -> None:
+        with self._lock:
+            if value is None:
+                self._db.execute("DELETE FROM settings WHERE key = ?", [key])
+            else:
+                self._db.execute("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [key, value])
+            self._db.commit()
 
     # -- change sets -----------------------------------------------------------
     def create_changeset(self, **values: Any) -> int:

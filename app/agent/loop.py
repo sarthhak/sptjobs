@@ -12,6 +12,7 @@ from typing import AsyncIterator
 import anthropic
 
 from ..context import AppContext
+from ..usage import budget_error, record
 from .prompt import SYSTEM_PROMPT
 from .tools import execute, tool_definitions
 
@@ -48,6 +49,10 @@ async def run_turn(ctx: AppContext, conversation_id: int, user_text: str) -> Asy
     json_retries = 0
 
     for _step in range(MAX_STEPS):
+        over = budget_error(store)
+        if over:
+            yield {"type": "error", "message": over}
+            return
         try:
             async with ctx.anthropic.beta.messages.stream(
                 model=ctx.settings.model,
@@ -88,6 +93,8 @@ async def run_turn(ctx: AppContext, conversation_id: int, user_text: str) -> Asy
             yield {"type": "error", "message": "Could not reach the Claude API."}
             return
 
+        if message.usage:
+            record(store, "chat", message.model or ctx.settings.model, message.usage, conversation_id)
         content = [b.to_dict(mode="json") for b in message.content]
         history.append({"role": "assistant", "content": content})
         store.append_message(conversation_id, "assistant", content)

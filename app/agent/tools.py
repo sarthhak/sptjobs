@@ -162,7 +162,7 @@ TOOLS = [
     Tool("gtm_container_overview", "List the tags, triggers and variables in the live (published) version of a container.", ContainerIn),
     Tool("gtm_get_entity", "Full JSON of one tag, trigger or variable from the live version.", EntityIn),
     Tool("gtm_run_audit", "Audit the live version of a container against implementation best practice. Returns a health score and findings; findings with fixable=true have an automatic fix.", ContainerIn),
-    Tool("gtm_propose_changes", "Create a change set for the user to review. Nothing is changed in GTM: the user reviews the diff in the Changes tab and decides whether to apply and publish it.", ProposeIn),
+    Tool("gtm_propose_changes", "Create a change set for the user to review. finding_ids takes a finding id (fixes all its items) or 'FINDING_ID@entity_id' for one item. Nothing is changed in GTM: the user reviews the diff in the Changes tab and decides whether to apply and publish it.", ProposeIn),
     Tool("verify_site", "Load a page in a headless browser and report which GTM containers load, which GA4 events fire (intercepted, not sent to GA4) and the dataLayer contents.", VerifyIn),
 ]
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
@@ -317,7 +317,8 @@ async def _propose(ctx, cid, a: ProposeIn):
         return ToolOutcome(f"Audit {a.audit_id} not found for {a.container_path}", True)
     result = audit["result"]
     c = Container(result["version_snapshot"])
-    ops, errors = build_changeset(c, result["findings"], a.finding_ids, [o.model_dump(exclude_none=True) for o in a.custom_ops])
+    findings = run_audit(c, ctx.settings.tag_naming_pattern)["findings"]
+    ops, errors = build_changeset(c, findings, a.finding_ids, [o.model_dump(exclude_none=True) for o in a.custom_ops])
     if not ops:
         return ToolOutcome(_json({"error": "No operations could be built", "details": errors}), True)
     csid = ctx.store.create_changeset(container_path=a.container_path, audit_id=a.audit_id, version_id=result.get("version_id"),

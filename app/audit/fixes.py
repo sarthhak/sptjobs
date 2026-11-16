@@ -72,19 +72,49 @@ def op_create(c: Container, kind: str, body: dict, reason: str, finding_id: str 
 
 # --- fixes per rule ---------------------------------------------------------
 
-def fix_ops(c: Container, finding: dict) -> list[dict]:
-    rule, fid, ids = finding["rule"], finding["id"], finding["entity_ids"]
+def fix_ops(c: Container, finding: dict, only: set[str] | None = None) -> list[dict]:
+    """Operations that fix a finding. `only` limits a multi-item finding to some of its items."""
+    rule, fid = finding["rule"], finding["id"]
     if not finding.get("fixable"):
         raise OpError(f"Finding {fid} has no automatic fix; describe custom operations instead")
+    item_ok = finding.get("item_fixable") or {}
+    ids = [i for i in finding["entity_ids"] if (only is None or i in only) and item_ok.get(i, True)]
+    if rule in ("DUPLICATE_TAG", "DUPLICATE_TRIGGER", "HARDCODED_MEASUREMENT_ID"):
+        ids = finding["entity_ids"]  # these fix a whole group at once
+    elif only and not ids:
+        raise OpError(f"None of the selected items in {fid} has an automatic fix")
 
     if rule == "UNUSED_TRIGGER":
-        return [op_delete(c, "trigger", ids[0], "Trigger is not used by any tag", fid)]
+        return [op_delete(c, "trigger", i, "Trigger is not used by any tag", fid) for i in ids]
     if rule == "UNUSED_VARIABLE":
-        return [op_delete(c, "variable", ids[0], "Variable is not referenced anywhere", fid)]
+        return [op_delete(c, "variable", i, "Variable is not referenced anywhere", fid) for i in ids]
     if rule == "PAUSED_TAG":
-        return [op_delete(c, "tag", ids[0], "Tag is paused and no longer needed", fid)]
+        return [op_delete(c, "tag", i, "Tag is paused and no longer needed", fid) for i in ids]
     if rule in ("TAG_NO_TRIGGER", "LEGACY_UA_TAG"):
-        return [op_update(c, "tag", ids[0], {"paused": True}, finding["title"] + " - pausing it", fid)]
+        reason = "Tag has no firing trigger - pausing it" if rule == "TAG_NO_TRIGGER" else "Universal Analytics is retired - pausing it"
+        return [op_update(c, "tag", i, {"paused": True}, reason, fid) for i in ids]
+    if rule == "GA4_EVENT_NAME_INVALID":
+        ops = []
+        for i in ids:
+            tag = c.tag_by_id[i]
+            new = sanitize_event_name(param(tag, "eventName"))
+            if new:
+                ops.append(op_update(c, "tag", i, {"parameter": _set_param(tag["parameter"], "eventName", new)},
+                                     f"Rename event '{param(tag, 'eventName')}' to '{new}'", fid))
+        return ops
+    if rule == "GA4_NO_MEASUREMENT_ID":
+        mids = ga4_measurement_ids(c)
+        if len(mids) != 1:
+            raise OpError("Need exactly one GA4 measurement ID in the container to fill it in automatically")
+        return [op_update(c, "tag", i, {"parameter": _set_param(c.tag_by_id[i].get("parameter"), "measurementIdOverride", next(iter(mids)))},
+                          "Set the missing measurement ID", fid) for i in ids]
+    if rule == "ECOMMERCE_NO_ITEMS":
+        ops = []
+        for i in ids:
+            params = _set_param(c.tag_by_id[i].get("parameter"), "sendEcommerceData", "true", "boolean")
+            ops.append(op_update(c, "tag", i, {"parameter": _set_param(params, "getEcommerceDataFrom", "dataLayer")},
+                                 "Send ecommerce data from the dataLayer", fid))
+        return ops
     if rule == "DUPLICATE_TAG":
         keep = ids[0]
         return [op_delete(c, "tag", i, f"Duplicate of tag {keep}", fid) for i in ids[1:]]
@@ -106,25 +136,6 @@ def fix_ops(c: Container, finding: dict) -> list[dict]:
                 ops.append(op_update(c, "tag", t["tagId"], patch, f"Point to trigger {keep} instead of its duplicates", fid))
         ops += [op_delete(c, "trigger", i, f"Duplicate of trigger {keep}", fid) for i in sorted(dupes)]
         return ops
-    if rule == "GA4_EVENT_NAME_INVALID":
-        tag = c.tag_by_id[ids[0]]
-        new = sanitize_event_name(param(tag, "eventName"))
-        if not new:
-            raise OpError("Could not derive a valid event name")
-        return [op_update(c, "tag", ids[0], {"parameter": _set_param(tag["parameter"], "eventName", new)},
-                          f"Rename event to '{new}'", fid)]
-    if rule == "GA4_NO_MEASUREMENT_ID":
-        mids = ga4_measurement_ids(c)
-        if len(mids) != 1:
-            raise OpError("Need exactly one GA4 measurement ID in the container to fill it in automatically")
-        tag = c.tag_by_id[ids[0]]
-        return [op_update(c, "tag", ids[0], {"parameter": _set_param(tag.get("parameter"), "measurementIdOverride", next(iter(mids)))},
-                          "Set the missing measurement ID", fid)]
-    if rule == "ECOMMERCE_NO_ITEMS":
-        tag = c.tag_by_id[ids[0]]
-        params = _set_param(tag.get("parameter"), "sendEcommerceData", "true", "boolean")
-        params = _set_param(params, "getEcommerceDataFrom", "dataLayer")
-        return [op_update(c, "tag", ids[0], {"parameter": params}, "Send ecommerce data from the dataLayer", fid)]
     if rule == "MISSING_CONVERSION_LINKER":
         body = {"name": "Google Ads - Conversion Linker - All Pages", "type": "gclidw", "firingTriggerId": [ALL_PAGES],
                 "parameter": [{"type": "boolean", "key": "enableCrossDomain", "value": "false"},
@@ -170,13 +181,21 @@ def build_changeset(c: Container, findings: list[dict], finding_ids: list[str], 
     """Returns (ops, errors). Duplicate operations on the same entity are rejected."""
     by_id = {f["id"]: f for f in findings}
     ops, errors = [], []
-    for fid in finding_ids:
+    selected: dict[str, set[str] | None] = {}
+    for ref in finding_ids:  # "FINDING_ID" (all items) or "FINDING_ID@entity_id" (one item)
+        fid, _, item = ref.partition("@")
+        if item:
+            if selected.get(fid, set()) is not None:
+                selected.setdefault(fid, set()).add(item)
+        else:
+            selected[fid] = None
+    for fid, only in selected.items():
         f = by_id.get(fid)
         if not f:
             errors.append(f"Unknown finding id {fid}")
             continue
         try:
-            ops.extend(fix_ops(c, f))
+            ops.extend(fix_ops(c, f, only))
         except OpError as e:
             errors.append(f"{fid}: {e}")
     for spec in custom:

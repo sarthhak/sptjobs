@@ -122,13 +122,18 @@ def client(tmp_path, fake_gtm):
 def test_excel_exports(client, fake_gtm):
     aid = client.post("/api/audits", json={"container_path": fake_gtm.container_path}).json()["id"]
     detail = client.get(f"/api/audits/{aid}").json()
-    assert detail["inventory"]["tags"] and detail["findings"][0]["affected"]
+    assert detail["inventory"]["tags"] and detail["findings"][0]["affected"] and detail["findings"][0]["ref"] == "F-01"
+    assert detail["scorecard"][-1]["area"] == "Total" and detail["scorecard"][-1]["total"] == len(detail["findings"])
+    assert len(detail["top_priorities"]) == 5 and detail["action_plan"] and detail["consent_matrix"]
     resp = client.get(f"/api/audits/{aid}/export.xlsx")
     assert resp.status_code == 200 and "gtm-audit-GTM-TEST1" in resp.headers["content-disposition"]
     wb = load_workbook(BytesIO(resp.content))
-    assert wb.sheetnames == ["Summary", "Findings", "Affected items", "Tags", "Triggers", "Variables"]
-    assert wb["Tags"].max_row == 13 and wb["Findings"]["B2"].value == "critical"
-    assert wb["Affected items"].max_row > len(detail["findings"])
+    assert wb.sheetnames == ["Executive Summary", "Findings Log", "Action Plan", "Consent Matrix", "Tag Inventory",
+                             "Trigger Inventory", "Variable Inventory", "Method & Legend"]
+    log = wb["Findings Log"]
+    header_row = next(r for r in range(1, 6) if log.cell(r, 1).value == "ID")
+    assert log.cell(header_row + 1, 1).value == "F-01" and log.cell(header_row + 1, 3).value == "Critical"
+    assert log.max_row - header_row == len(detail["findings"])
 
     gid = client.post("/api/ga4-audits", json={"property": "properties/123"}).json()["id"]
     assert client.get("/api/ga4-audits").json()[0]["property_name"] == "Example site"

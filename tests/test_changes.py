@@ -48,7 +48,7 @@ def test_conflicting_fixes_are_reported(version):
 
 def test_non_fixable_and_custom_op_validation(version):
     c, result = Container(version), audit(version)
-    ops, errors = build_changeset(c, result["findings"], [fid(result, "CONSENT_NOT_SET")], [])
+    ops, errors = build_changeset(c, result["findings"], [fid(result, "CONSENT_NOT_ENFORCED")], [])
     assert ops == [] and "no automatic fix" in errors[0]
     with pytest.raises(OpError):
         custom_op(c, {"op": "update", "kind": "tag", "entity_id": "1", "patch": {"type": "html"}})

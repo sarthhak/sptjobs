@@ -28,6 +28,22 @@ def _mask_url(url: str) -> str:
     return re.sub(r"([?&](?:e-?mail|email_address|phone|mobile|tel|password|pwd|first_?name|last_?name|address)=)[^&]*", r"\1***", url, flags=re.I)
 
 
+def friendly_error(err: str) -> str:
+    """Turns raw Google API errors into one actionable sentence."""
+    m = re.search(r"(Google Analytics (?:Data|Admin) API) has not been used in project (\d+)", err)
+    if m or "SERVICE_DISABLED" in err:
+        api = m.group(1) if m else "a Google API"
+        proj = m.group(2) if m else ""
+        slug = "analyticsdata" if "Data" in api else "analyticsadmin"
+        link = f"https://console.cloud.google.com/apis/library/{slug}.googleapis.com" + (f"?project={proj}" if proj else "")
+        return f"The {api} is not enabled in your Google Cloud project{' ' + proj if proj else ''}. Enable it at {link}, wait a minute, then run the audit again."
+    if "insufficient permissions" in err.lower() or "PERMISSION_DENIED" in err:
+        return "The connected Google account (or service account) doesn't have access to this property."
+    if "429" in err or "quota" in err.lower():
+        return "GA4 API quota for this property is used up for now; try again later."
+    return err[:300]
+
+
 def _share(part: float, total: float) -> float:
     return round(100 * part / total, 1) if total else 0.0
 
@@ -43,12 +59,14 @@ def run_ga4_audit(ga4, prop: str) -> dict:
             warnings.update(data.get("warnings") or [])
             return data
         except Exception as e:  # noqa: BLE001
-            errors[name] = str(e)[:300]
+            errors[name] = friendly_error(str(e))
             return None
 
     cfg = ga4.property_config(prop)
-    errors.update({f"settings: {k}": v for k, v in (cfg.get("errors") or {}).items()})
+    errors.update({f"settings: {k}": friendly_error(v) for k, v in (cfg.get("errors") or {}).items()})
     p = cfg.get("property") or {}
+    property_type = p.get("propertyType", "PROPERTY_TYPE_ORDINARY")
+    is_rollup = property_type in ("PROPERTY_TYPE_ROLLUP", "PROPERTY_TYPE_SUBPROPERTY")
     streams = cfg.get("data_streams") or []
     web_streams = [s for s in streams if s.get("type") == "WEB_DATA_STREAM"]
     key_events = [k.get("eventName") for k in cfg.get("key_events") or [] if k.get("eventName")]
@@ -66,7 +84,7 @@ def run_ga4_audit(ga4, prop: str) -> dict:
             "No events are marked as key events (formerly conversions).",
             "Admin > Events: mark your important actions (purchase, generate_lead, sign_up...) as key events.",
             "Configuration", "Conversion reporting, attribution and Google Ads bidding have nothing to optimise for.", "Analytics + Marketing"))
-    if "data_streams" in cfg and not web_streams:
+    if "data_streams" in cfg and not web_streams and not is_rollup:
         findings.append(_finding("NO_WEB_STREAM", "medium", "No web data stream", "The property has no web data stream.",
             "Create a web stream if this property should measure a website.", "Configuration", "No website data is collected."))
     for name, em in (cfg.get("enhanced_measurement") or {}).items():
@@ -241,8 +259,12 @@ def run_ga4_audit(ga4, prop: str) -> dict:
 
     findings.sort(key=lambda f: SEVERITY_ORDER.index(f["severity"]))
     score = max(0, 100 - sum(SEVERITY_WEIGHT[f["severity"]] for f in findings))
+    incomplete = "overview" in errors  # the data checks couldn't run, so the score only reflects settings
+    problems = list(dict.fromkeys(errors.values()))  # same root cause reported once
     settings = {
         "Property": f"{p.get('displayName', '')} ({prop})",
+        "Property type": {"PROPERTY_TYPE_ROLLUP": "Roll-up (data streams live in the source properties)",
+                          "PROPERTY_TYPE_SUBPROPERTY": "Sub-property"}.get(property_type, "Standard"),
         "Time zone": p.get("timeZone", ""), "Currency": p.get("currencyCode", ""), "Industry": p.get("industryCategory", ""),
         "Service level": p.get("serviceLevel", ""), "Event data retention": retention or "",
         "Reset retention on new activity": (cfg.get("data_retention") or {}).get("resetUserDataOnNewActivity", ""),
@@ -255,7 +277,8 @@ def run_ga4_audit(ga4, prop: str) -> dict:
     }
     return {
         "property": prop, "property_name": p.get("displayName") or prop, "period": "Last 28 days (to yesterday)",
-        "score": score, "counts": {s: sum(1 for f in findings if f["severity"] == s) for s in SEVERITY_ORDER},
+        "score": None if incomplete else score, "incomplete": incomplete, "problems": problems,
+        "property_type": {"PROPERTY_TYPE_ROLLUP": "Roll-up", "PROPERTY_TYPE_SUBPROPERTY": "Sub-property"}.get(property_type, "Standard"), "counts": {s: sum(1 for f in findings if f["severity"] == s) for s in SEVERITY_ORDER},
         "findings": findings, "settings": settings,
         "overview": {k: totals.get(k) for k in ("sessions", "totalUsers", "engagementRate", "keyEvents", "eventCount")},
         "channels": (channels or {}).get("rows", [])[:20],
