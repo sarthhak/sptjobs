@@ -6,6 +6,7 @@ import asyncio
 import hmac
 import json
 import logging
+import secrets
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -22,6 +23,7 @@ from .audit.fixes import build_changeset
 from .charts import build_chart
 from .config import load_settings
 from .context import AppContext
+from .google_oauth import OAuthError, authorization_url, exchange_code, save_token
 
 log = logging.getLogger("analytics_expert")
 STATIC = Path(__file__).parent / "static"
@@ -60,7 +62,7 @@ def build_default_context() -> AppContext:
         client = None
     return AppContext(settings=settings, store=Store(settings.db_path), ga4=GA4Client(creds),
                       gtm=GTMClient(creds, settings.gtm_write_interval), anthropic=client,
-                      verify_site=verify_site, google_status=google_status)
+                      verify_site=verify_site, google_status=google_status, google_reset=creds.reset)
 
 
 def _diff_ops(ops: list[dict]) -> list[dict]:
@@ -89,7 +91,9 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
     @app.middleware("http")
     async def require_login(request: Request, call_next):
         path = request.url.path
-        if path in ("/login", "/healthz") or path.startswith("/static/"):
+        # Google's sign-in redirect is cross-site, so the strict session cookie isn't sent with it;
+        # that request is authenticated by its signed, short-lived state value instead.
+        if path in ("/login", "/healthz", "/oauth/google/callback") or path.startswith("/static/"):
             return await call_next(request)
         if settings.app_password:
             token = request.cookies.get(SESSION_COOKIE, "")
@@ -136,11 +140,53 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
         return FileResponse(STATIC / "index.html")
 
     @app.get("/api/status")
-    async def status():
+    async def status(request: Request):
         google = await asyncio.to_thread(ctx.google_status)
         return {"model": settings.model, "writes_enabled": settings.allow_gtm_writes, "google": google,
                 "claude_configured": ctx.anthropic is not None, "site_url": settings.site_url,
-                "password_protected": bool(settings.app_password)}
+                "password_protected": bool(settings.app_password),
+                "google_signin_available": bool(settings.google_oauth_client_id and settings.google_oauth_client_secret),
+                "google_signed_in": settings.google_token_file.exists(),
+                "google_uses_service_account": bool(settings.google_service_account_json or settings.google_service_account_file),
+                "google_redirect_uri": _redirect_uri(request)}
+
+    # -- Connect Google account ------------------------------------------------------
+    oauth_signer = URLSafeTimedSerializer(settings.session_secret, salt="google-oauth")
+
+    def _redirect_uri(request: Request) -> str:
+        base = settings.public_url or str(request.base_url).rstrip("/")
+        return f"{base}/oauth/google/callback"
+
+    @app.get("/oauth/google/start")
+    async def google_start(request: Request):
+        if not (settings.google_oauth_client_id and settings.google_oauth_client_secret):
+            raise HTTPException(400, "Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET first.")
+        state = oauth_signer.dumps(secrets.token_urlsafe(16))
+        return RedirectResponse(authorization_url(settings.google_oauth_client_id, _redirect_uri(request), state), status_code=303)
+
+    @app.get("/oauth/google/callback")
+    async def google_callback(request: Request, state: str = "", code: str = "", error: str = ""):
+        try:
+            oauth_signer.loads(state, max_age=600)
+        except BadSignature:
+            return RedirectResponse("/#settings/expired", status_code=303)
+        if error or not code:
+            return RedirectResponse("/#settings/cancelled", status_code=303)
+        try:
+            token = await asyncio.to_thread(exchange_code, settings.google_oauth_client_id,
+                                            settings.google_oauth_client_secret, code, _redirect_uri(request))
+            save_token(settings.google_token_file, token, settings.google_oauth_client_id, settings.google_oauth_client_secret)
+        except OAuthError as e:
+            log.warning("Google sign-in failed: %s", e)
+            return RedirectResponse("/#settings/failed", status_code=303)
+        ctx.google_reset()
+        return RedirectResponse("/#settings/connected", status_code=303)
+
+    @app.post("/api/google/disconnect")
+    async def google_disconnect():
+        settings.google_token_file.unlink(missing_ok=True)
+        ctx.google_reset()
+        return {"ok": True}
 
     # -- conversations -----------------------------------------------------------
     @app.get("/api/conversations")

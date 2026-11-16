@@ -16,3 +16,4 @@ class AppContext:
     anthropic: Any      # anthropic.AsyncAnthropic, or None if no API key is configured
     verify_site: Callable[..., Awaitable[dict]]
     google_status: Callable[[], str] = field(default=lambda: "unknown")
+    google_reset: Callable[[], None] = field(default=lambda: None)

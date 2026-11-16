@@ -191,3 +191,57 @@ def test_no_claude_key_gives_clear_error(make_client):
     cid = client.post("/api/conversations").json()["id"]
     events = sse_events(client.post(f"/api/conversations/{cid}/chat", json={"message": "hi"}))
     assert events == [{"type": "error", "message": "ANTHROPIC_API_KEY is not set on the server."}]
+
+
+def test_google_signin_flow(tmp_path, fake_gtm, monkeypatch):
+    import app.main as main_mod
+    from app.google_auth import SCOPES
+    from urllib.parse import parse_qs, urlparse
+
+    token_file = tmp_path / "google_token.json"
+    settings = Settings(app_password="pw", session_secret="test-secret", data_dir=tmp_path, google_token_file=token_file,
+                        google_oauth_client_id="cid.apps.googleusercontent.com", google_oauth_client_secret="csecret",
+                        public_url="https://myapp.up.railway.app")
+    resets = []
+    ctx = AppContext(settings=settings, store=Store(tmp_path / "t.db"), ga4=FakeGA4(), gtm=fake_gtm, anthropic=None,
+                     verify_site=fake_verify, google_reset=lambda: resets.append(1))
+    client = TestClient(create_app(ctx))
+
+    # Starting sign-in requires being logged in to the app.
+    assert client.get("/oauth/google/start", follow_redirects=False).headers["location"] == "/login"
+    client.post("/login", content="password=pw", headers={"Content-Type": "application/x-www-form-urlencoded"})
+    status = client.get("/api/status").json()
+    assert status["google_signin_available"] and not status["google_signed_in"]
+    assert status["google_redirect_uri"] == "https://myapp.up.railway.app/oauth/google/callback"
+
+    start = client.get("/oauth/google/start", follow_redirects=False)
+    q = parse_qs(urlparse(start.headers["location"]).query)
+    assert q["client_id"] == ["cid.apps.googleusercontent.com"] and q["access_type"] == ["offline"]
+    assert q["redirect_uri"] == ["https://myapp.up.railway.app/oauth/google/callback"]
+    state = q["state"][0]
+
+    seen = {}
+
+    def fake_exchange(cid, secret, code, redirect_uri):
+        seen.update(code=code, redirect_uri=redirect_uri)
+        return {"access_token": "at", "refresh_token": "rt", "scope": " ".join(SCOPES)}
+
+    monkeypatch.setattr(main_mod, "exchange_code", fake_exchange)
+    other = TestClient(client.app)  # Google's redirect arrives without the app's session cookie
+    assert other.get("/oauth/google/callback?state=forged&code=x", follow_redirects=False).headers["location"] == "/#settings/expired"
+    assert not token_file.exists()
+    done = other.get(f"/oauth/google/callback?state={state}&code=abc", follow_redirects=False)
+    assert done.headers["location"] == "/#settings/connected"
+    saved = json.loads(token_file.read_text())
+    assert saved["refresh_token"] == "rt" and saved["client_id"] == "cid.apps.googleusercontent.com"
+    assert seen == {"code": "abc", "redirect_uri": "https://myapp.up.railway.app/oauth/google/callback"} and resets
+
+    # Missing permissions are rejected rather than saved.
+    token_file.unlink()
+    monkeypatch.setattr(main_mod, "exchange_code", lambda *a: {"access_token": "at", "refresh_token": "rt", "scope": SCOPES[0]})
+    state2 = parse_qs(urlparse(client.get("/oauth/google/start", follow_redirects=False).headers["location"]).query)["state"][0]
+    assert other.get(f"/oauth/google/callback?state={state2}&code=abc", follow_redirects=False).headers["location"] == "/#settings/failed"
+    assert not token_file.exists()
+
+    token_file.write_text("{}")
+    assert client.post("/api/google/disconnect").json() == {"ok": True} and not token_file.exists()

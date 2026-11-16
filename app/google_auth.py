@@ -41,6 +41,11 @@ class GoogleCredentials:
             return f"service account ({self._sa_file.name})"
         return f"OAuth user token ({self._token_file})"
 
+    def reset(self) -> None:
+        """Forget cached credentials, e.g. after a new Google sign-in."""
+        with self._lock:
+            self._creds = None
+
     def get(self):
         with self._lock:
             if self._creds is None:
@@ -63,8 +68,8 @@ class GoogleCredentials:
         if self._token_file.exists():
             return user_credentials.Credentials.from_authorized_user_file(str(self._token_file), SCOPES)
         raise GoogleAuthMissing(
-            "No Google credentials. Set GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SERVICE_ACCOUNT_FILE, or run "
-            "`python scripts/google_login.py` to create an OAuth token."
+            "No Google credentials. Set GOOGLE_SERVICE_ACCOUNT_JSON, or "
+            "use 'Connect Google account' on the Connection page."
         )
 
     def build(self, api: str, version: str):

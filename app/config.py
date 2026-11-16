@@ -47,6 +47,11 @@ class Settings:
     tag_naming_pattern: str = r"^[^-]+ - [^-]+ - .+$"
     # Optional site URL that is checked with a headless browser after a publish
     site_url: str | None = None
+    # 'Connect Google account' button: an OAuth client of type Web application
+    google_oauth_client_id: str | None = None
+    google_oauth_client_secret: str | None = None
+    # Public address of the app, e.g. https://myapp.up.railway.app (worked out from requests if unset)
+    public_url: str | None = None
 
     @property
     def db_path(self) -> Path:
@@ -77,4 +82,7 @@ def load_settings() -> Settings:
         gtm_write_interval=float(os.environ.get("GTM_WRITE_INTERVAL", "4")),
         tag_naming_pattern=os.environ.get("TAG_NAMING_PATTERN", r"^[^-]+ - [^-]+ - .+$"),
         site_url=os.environ.get("SITE_URL") or None,
+        google_oauth_client_id=os.environ.get("GOOGLE_OAUTH_CLIENT_ID") or None,
+        google_oauth_client_secret=os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET") or None,
+        public_url=(os.environ.get("PUBLIC_URL") or "").rstrip("/") or None,
     )

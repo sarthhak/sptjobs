@@ -375,18 +375,45 @@ async function reportsPage() {
       : '<p class="muted" style="padding:12px">No reports yet.</p>'}</div></div>`;
 }
 
-async function settingsPage() {
+const SIGNIN_MESSAGES = {
+  connected: "Google account connected.",
+  cancelled: "Google sign-in was cancelled.",
+  failed: "Google sign-in failed. Check that every permission box was ticked, then try again.",
+  expired: "The sign-in link expired. Click Connect Google account again.",
+};
+
+async function settingsPage(result) {
   await loadStatus();
   const s = STATUS;
+  let google = esc(s.google);
+  if (s.google_uses_service_account) {
+    google += '<div class="muted">Using the service-account key. Remove GOOGLE_SERVICE_ACCOUNT_JSON to use your own Google login instead.</div>';
+  } else if (s.google_signin_available) {
+    google += `<div class="row" style="margin-top:8px">
+      <a href="/oauth/google/start"><button class="primary" type="button">${s.google_signed_in ? "Reconnect" : "Connect"} Google account</button></a>
+      ${s.google_signed_in ? '<button type="button" id="disconnect">Disconnect</button>' : ""}</div>
+      <div class="muted" style="margin-top:6px">Sign in with the Google account that has access to your GA4 properties and GTM containers.</div>`;
+  } else {
+    google += `<div class="muted" style="margin-top:6px">To sign in with your Google account, set GOOGLE_OAUTH_CLIENT_ID and
+      GOOGLE_OAUTH_CLIENT_SECRET. When creating the OAuth client, add this authorized redirect URI:</div>
+      <pre>${esc(s.google_redirect_uri)}</pre>`;
+  }
   view.innerHTML = `<div class="page"><h1>Connection</h1>
+    ${SIGNIN_MESSAGES[result] ? `<div class="banner">${esc(SIGNIN_MESSAGES[result])}</div>` : ""}
     <div class="card"><table>
       <tr><th>Claude</th><td>${s.claude_configured ? "Configured" : "Not configured: set ANTHROPIC_API_KEY on the server"} (model ${esc(s.model)})</td></tr>
-      <tr><th>Google</th><td>${esc(s.google)}</td></tr>
+      <tr><th>Google</th><td>${google}</td></tr>
       <tr><th>GTM writes</th><td>${s.writes_enabled ? "Enabled: change sets can be applied and published after your approval" : "Disabled (read-only). Set ALLOW_GTM_WRITES=true to enable apply/publish."}</td></tr>
       <tr><th>Post-publish site check</th><td>${s.site_url ? esc(s.site_url) : "Off (set SITE_URL)"}</td></tr>
       <tr><th>Password</th><td>${s.password_protected ? "On" : "Off: only reachable from this machine"}</td></tr>
     </table></div>
     <form method="post" action="/logout"><button>Log out</button></form></div>`;
+  const dc = document.getElementById("disconnect");
+  if (dc) dc.onclick = async () => {
+    if (!confirm("Disconnect your Google account from this app?")) return;
+    await post("/api/google/disconnect");
+    location.hash = "settings";
+  };
 }
 
 loadStatus().then(route);

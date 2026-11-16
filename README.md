@@ -38,15 +38,25 @@ installed on your office laptop.
 Create a key at console.anthropic.com and put it in `ANTHROPIC_API_KEY`.
 
 ### 2. Google access
-In a Google Cloud project, enable **Google Analytics Data API**, **Google Analytics Admin API** and
-**Tag Manager API**. Then choose one option:
+Google requires a small one-time setup in Google Cloud (console.cloud.google.com, all in the browser):
 
-- **Service account (recommended for a server).** Create a service account and download a JSON key. Add
-  its email address as a user in GA4 (Property access management, **Viewer**) and in GTM (container user,
-  **Publish** permission, or **Read** if you only want audits). Paste the key file's contents into `GOOGLE_SERVICE_ACCOUNT_JSON` (or set `GOOGLE_SERVICE_ACCOUNT_FILE` to its path).
-- **Your own Google login.** Create an OAuth client of type *Desktop app*, download `client_secret.json`, then
-  on a computer with a browser run `python scripts/google_login.py --client-secret client_secret.json`. Copy the
-  resulting `data/google_token.json` to the server.
+1. Create a project, then under **APIs & Services > Library** enable **Google Analytics Data API**,
+   **Google Analytics Admin API** and **Tag Manager API**.
+2. Choose how the app signs in:
+   - **Your own Google account (easiest).** Under **Google Auth Platform**: in *Branding* fill in an app name
+     and your email; in *Audience* choose *External* and click **Publish app** (in *Testing* mode Google expires
+     the sign-in after 7 days); in *Clients* create a client of type **Web application** with the authorized
+     redirect URI `https://YOUR-APP-ADDRESS/oauth/google/callback` (the Connection page shows the exact value).
+     Set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`, open the app's **Connection** page and click
+     **Connect Google account**. Sign in with the account that has GA4 and GTM access. Google will warn that the
+     app isn't verified; it's your own app, so choose *Advanced > Go to ...*.
+   - **Service account.** Create a service account and a JSON key. Add its email as a user in GA4
+     (**Viewer**) and GTM (**Publish**, or **Read** for audits only). Paste the key file's contents into
+     `GOOGLE_SERVICE_ACCOUNT_JSON`.
+
+If your GA4/GTM access comes through a company Google Workspace account, the Workspace admin may block
+unverified apps or outside service accounts. In that case create the Google Cloud project inside your company's
+organisation (choose *Internal* in *Audience*), or ask the admin to allow the app.
 
 ### 3. Run it
 ```bash
@@ -68,7 +78,9 @@ HTTPS address. Everything is done in the browser.
 3. In the service, open **Variables** and add:
    - `ANTHROPIC_API_KEY` - your Claude API key
    - `APP_PASSWORD` - a long password for logging in
-   - `GOOGLE_SERVICE_ACCOUNT_JSON` - open the service-account key file and paste its whole contents
+   - `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` (then use **Connect Google account** in the app),
+     or `GOOGLE_SERVICE_ACCOUNT_JSON` - the whole service-account key file
+   - `PUBLIC_URL` - the app's address, e.g. `https://myapp.up.railway.app`
    - `DATA_DIR` = `/data`
    - `ALLOW_GTM_WRITES` = `false` for now
 4. Right-click the service > **Attach volume**, mount path `/data`. This keeps conversations, audits and
